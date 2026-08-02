@@ -20,6 +20,18 @@ async function bootstrap(): Promise<void> {
   const configService = app.get(ConfigService);
   const port = configService.get<number>('app.port', 3000);
 
+  // Shutdown hooks: en SIGTERM/SIGINT (p. ej. re-deploys en Railway) NestJS
+  // ejecuta los OnModuleDestroy y GameEventCollector cierra el SSE limpio.
+  app.enableShutdownHooks();
+
+  // Health check sin estado: útil para health-checks de plataforma y
+  // monitoreo externo. No toca la lógica del motor.
+  const health = app.get(EngineHealth);
+  app.getHttpAdapter().get('/healthz', () => ({
+    status: 'ok',
+    ...health.getSnapshot(),
+  }));
+
   // `app.listen()` garantiza que TODOS los `onModuleInit` de la aplicación
   // ya corrieron (Strategy, Operation, Notification, Statistics,
   // EngineMetrics ya están suscritos al DomainEventBus). Solo después de
