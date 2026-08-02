@@ -114,25 +114,26 @@ export class Operation {
    *
    * La comparación siempre es `recommendedWinner` vs `game.winner` (nunca
    * `score`). Un TIE nunca consume martingala, nunca cambia de estado y
-   * nunca finaliza la operación: simplemente se ignora y se sigue
-   * esperando. Si la operación ya terminó, no hace nada (defensivo:
-   * OperationCoordinator la elimina de las activas apenas termina, por lo
-   * que en condiciones normales esto nunca debería ocurrir). Tampoco hace
-   * nada si `game` es la misma partida que la disparó: eso puede pasar si
-   * un subscriber alcanza a reenviar ese GameReceivedEvent después de que
-   * la Operation ya se creó (ver `triggerGameId`).
+   * nunca finaliza la operación, pero sí reporta `tieOccurred = true` para
+   * que el coordinator decida notificarlo. Si la operación ya terminó, no
+   * hace nada (defensivo: OperationCoordinator la elimina de las activas
+   * apenas termina, por lo que en condiciones normales esto nunca debería
+   * ocurrir). Tampoco hace nada si `game` es la misma partida que la
+   * disparó: eso puede pasar si un subscriber alcanza a reenviar ese
+   * GameReceivedEvent después de que la Operation ya se creó (ver
+   * `triggerGameId`).
    */
   update(game: Game): OperationUpdateResult {
     if (this.isFinished()) {
-      return this.buildResult(false, undefined);
+      return this.buildResult(false, undefined, false);
     }
 
     if (game.uuid === this.triggerGameId) {
-      return this.buildResult(false, undefined);
+      return this.buildResult(false, undefined, false);
     }
 
     if (game.winner === WinnerType.TIE) {
-      return this.buildResult(false, undefined);
+      return this.buildResult(false, undefined, true);
     }
 
     if (game.winner === this.recommendedWinner) {
@@ -208,15 +209,17 @@ export class Operation {
       this.finishedAt = transition.timestamp;
     }
 
-    return this.buildResult(true, transition);
+    return this.buildResult(true, transition, false);
   }
 
   private buildResult(
     stateChanged: boolean,
     transition: OperationTransition | undefined,
+    tieOccurred: boolean,
   ): OperationUpdateResult {
     return Object.freeze({
       stateChanged,
+      tieOccurred,
       newState: this.state,
       completed: this.isFinished(),
       transition,

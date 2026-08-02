@@ -5,6 +5,7 @@ import { GameReceivedEvent } from '../../core/domain-events/game/game-received.e
 import { MartingaleOneReachedEvent } from '../../core/domain-events/operation/martingale-one-reached.event';
 import { OperationLostEvent } from '../../core/domain-events/operation/operation-lost.event';
 import { OperationOpenedEvent } from '../../core/domain-events/operation/operation-opened.event';
+import { OperationTieOccurredEvent } from '../../core/domain-events/operation/operation-tie-occurred.event';
 import { OperationWonEvent } from '../../core/domain-events/operation/operation-won.event';
 import { StrategyTriggeredEvent } from '../../core/domain-events/strategy/strategy-triggered.event';
 import { WinnerType } from '../../core/enums/winner-type.enum';
@@ -190,13 +191,18 @@ describe('OperationCoordinator', () => {
     expect(coordinator.activeCount()).toBe(0);
   });
 
-  it('does not publish anything for a TIE, and keeps the operation active', () => {
+  it('publishes OperationTieOccurredEvent for a TIE, and keeps the operation active', () => {
     triggerStrategy({ recommendedWinner: WinnerType.BANKER });
     domainEventBus.publish.mockClear();
 
     receiveGame(WinnerType.TIE);
 
-    expect(domainEventBus.publish).not.toHaveBeenCalled();
+    expect(domainEventBus.publish).toHaveBeenCalledTimes(1);
+    expect(domainEventBus.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: OperationTieOccurredEvent.eventName,
+      }),
+    );
     expect(coordinator.activeCount()).toBe(1);
   });
 

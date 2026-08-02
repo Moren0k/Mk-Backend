@@ -5,6 +5,7 @@ import { MartingaleOneReachedEvent } from '../../core/domain-events/operation/ma
 import { MartingaleTwoReachedEvent } from '../../core/domain-events/operation/martingale-two-reached.event';
 import { OperationLostEvent } from '../../core/domain-events/operation/operation-lost.event';
 import { OperationOpenedEvent } from '../../core/domain-events/operation/operation-opened.event';
+import { OperationTieOccurredEvent } from '../../core/domain-events/operation/operation-tie-occurred.event';
 import { OperationWonEvent } from '../../core/domain-events/operation/operation-won.event';
 import { NotificationFailedEvent } from '../../core/domain-events/notification/notification-failed.event';
 import { NotificationSentEvent } from '../../core/domain-events/notification/notification-sent.event';
@@ -20,6 +21,7 @@ import {
   Notification,
 } from '../../core/notification/notification.type';
 import { OperationSnapshot } from '../../core/operation/types/operation-snapshot.type';
+import { DistributionMetric } from '../metrics/distribution.metric';
 import { NotificationCoordinator } from './notification.coordinator';
 
 function buildSnapshot(
@@ -66,6 +68,7 @@ function buildChannel(
 describe('NotificationCoordinator', () => {
   let domainEventBus: jest.Mocked<DomainEventBus>;
   let errorTracker: EngineErrorTracker;
+  let distributionMetric: jest.Mocked<Pick<DistributionMetric, 'getSnapshot'>>;
   let notificationFactory: jest.Mocked<
     Pick<
       NotificationFactory,
@@ -74,6 +77,7 @@ describe('NotificationCoordinator', () => {
       | 'createForMartingaleTwoReached'
       | 'createForOperationWon'
       | 'createForOperationLost'
+      | 'createForTieOccurred'
     >
   >;
 
@@ -91,32 +95,46 @@ describe('NotificationCoordinator', () => {
     notificationFactory = {
       createForOperationOpened: jest
         .fn()
-        .mockImplementation((_s, channel: NotificationChannelType) =>
+        .mockImplementation((_: unknown, channel: NotificationChannelType) =>
           buildNotification(channel),
         ),
       createForMartingaleOneReached: jest
         .fn()
-        .mockImplementation((_s, channel: NotificationChannelType) =>
+        .mockImplementation((_: unknown, channel: NotificationChannelType) =>
           buildNotification(channel),
         ),
       createForMartingaleTwoReached: jest
         .fn()
-        .mockImplementation((_s, channel: NotificationChannelType) =>
+        .mockImplementation((_: unknown, channel: NotificationChannelType) =>
           buildNotification(channel),
         ),
       createForOperationWon: jest
         .fn()
-        .mockImplementation((_s, channel: NotificationChannelType) =>
+        .mockImplementation((_: unknown, channel: NotificationChannelType) =>
           buildNotification(channel),
         ),
       createForOperationLost: jest
         .fn()
-        .mockImplementation((_s, channel: NotificationChannelType) =>
+        .mockImplementation((_: unknown, channel: NotificationChannelType) =>
+          buildNotification(channel),
+        ),
+      createForTieOccurred: jest
+        .fn()
+        .mockImplementation((_: unknown, channel: NotificationChannelType) =>
           buildNotification(channel),
         ),
     };
 
     errorTracker = new EngineErrorTracker();
+
+    distributionMetric = {
+      getSnapshot: jest.fn().mockReturnValue({
+        playerPct: 48.5,
+        tiePct: 12.0,
+        bankerPct: 39.5,
+        totalGames: 200,
+      }),
+    };
   });
 
   afterEach(() => {
@@ -129,10 +147,11 @@ describe('NotificationCoordinator', () => {
       channels,
       notificationFactory as unknown as NotificationFactory,
       errorTracker,
+      distributionMetric as unknown as DistributionMetric,
     );
   }
 
-  it('subscribes to all 5 Operation events on module init', () => {
+  it('subscribes to all 6 Operation events on module init', () => {
     const coordinator = build([]);
 
     coordinator.onModuleInit();
@@ -143,6 +162,7 @@ describe('NotificationCoordinator', () => {
       MartingaleTwoReachedEvent.eventName,
       OperationWonEvent.eventName,
       OperationLostEvent.eventName,
+      OperationTieOccurredEvent.eventName,
     ]) {
       expect(domainEventBus.subscribe).toHaveBeenCalledWith(
         eventName,
@@ -151,13 +171,13 @@ describe('NotificationCoordinator', () => {
     }
   });
 
-  it('unsubscribes from all 5 events on module destroy, using the same references', () => {
+  it('unsubscribes from all 6 events on module destroy, using the same references', () => {
     const coordinator = build([]);
     coordinator.onModuleInit();
 
     coordinator.onModuleDestroy();
 
-    expect(domainEventBus.unsubscribe).toHaveBeenCalledTimes(5);
+    expect(domainEventBus.unsubscribe).toHaveBeenCalledTimes(6);
     for (const [eventName, handler] of domainEventBus.subscribe.mock.calls) {
       expect(domainEventBus.unsubscribe).toHaveBeenCalledWith(
         eventName,
@@ -182,6 +202,7 @@ describe('NotificationCoordinator', () => {
       [MartingaleTwoReachedEvent.eventName]: MartingaleTwoReachedEvent,
       [OperationWonEvent.eventName]: OperationWonEvent,
       [OperationLostEvent.eventName]: OperationLostEvent,
+      [OperationTieOccurredEvent.eventName]: OperationTieOccurredEvent,
     }[eventName]!;
 
     handler.handle(new EventClass(snapshot));
@@ -197,6 +218,7 @@ describe('NotificationCoordinator', () => {
     expect(notificationFactory.createForOperationOpened).toHaveBeenCalledWith(
       snapshot,
       NotificationChannelType.TELEGRAM,
+      expect.anything(),
     );
     expect(channel.send).toHaveBeenCalledTimes(1);
   });
@@ -221,6 +243,9 @@ describe('NotificationCoordinator', () => {
 
     dispatchEvent(coordinator, OperationLostEvent.eventName, snapshot);
     expect(notificationFactory.createForOperationLost).toHaveBeenCalled();
+
+    dispatchEvent(coordinator, OperationTieOccurredEvent.eventName, snapshot);
+    expect(notificationFactory.createForTieOccurred).toHaveBeenCalled();
   });
 
   it('skips a channel that is disabled', () => {
@@ -346,5 +371,15 @@ describe('NotificationCoordinator', () => {
       }),
     );
     expect(errorTracker.getLastError()?.message).toContain('TELEGRAM');
+  });
+
+  it('calls getSnapshot() once per dispatched event, regardless of channel count', () => {
+    const channel1 = buildChannel(NotificationChannelType.TELEGRAM);
+    const channel2 = buildChannel(NotificationChannelType.TELEGRAM);
+    const coordinator = build([channel1, channel2]);
+
+    dispatchEvent(coordinator, OperationOpenedEvent.eventName, buildSnapshot());
+
+    expect(distributionMetric.getSnapshot).toHaveBeenCalledTimes(1);
   });
 });

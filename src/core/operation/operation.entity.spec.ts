@@ -125,7 +125,7 @@ describe('Operation', () => {
     expect(result.completed).toBe(true);
   });
 
-  it('ignores a TIE: no state change, no martingale consumed, never finishes', () => {
+  it('ignores a TIE: no state change, no martingale consumed, never finishes, but reports tieOccurred', () => {
     const operation = Operation.open(
       buildSignal({ recommendedWinner: WinnerType.BANKER }),
     );
@@ -133,6 +133,7 @@ describe('Operation', () => {
     const result = operation.update(buildGame('1', WinnerType.TIE));
 
     expect(result.stateChanged).toBe(false);
+    expect(result.tieOccurred).toBe(true);
     expect(result.completed).toBe(false);
     expect(result.transition).toBeUndefined();
     expect(operation.currentState).toBe(OperationState.OPEN);
@@ -176,6 +177,7 @@ describe('Operation', () => {
     );
 
     expect(result.stateChanged).toBe(false);
+    expect(result.tieOccurred).toBe(false);
     expect(result.transition).toBeUndefined();
     expect(operation.currentState).toBe(OperationState.OPEN);
     expect(operation.currentMartingale).toBe(0);
@@ -196,13 +198,14 @@ describe('Operation', () => {
     const afterFinished = operation.update(buildGame('2', WinnerType.PLAYER));
 
     expect(afterFinished.stateChanged).toBe(false);
+    expect(afterFinished.tieOccurred).toBe(false);
     expect(afterFinished.transition).toBeUndefined();
     expect(operation.currentState).toBe(OperationState.WON);
     expect(operation.history).toHaveLength(1);
   });
 
   describe('internal history', () => {
-    it('only records games that actually changed the state, skipping ties', () => {
+    it('only records games that actually changed the state, skipping ties in history', () => {
       const operation = Operation.open(
         buildSignal({ recommendedWinner: WinnerType.BANKER }),
       );

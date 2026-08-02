@@ -9,6 +9,7 @@ import { OperationTransition } from './operation-transition.type';
  */
 export type OperationUpdateResult = {
   readonly stateChanged: boolean;
+  readonly tieOccurred: boolean;
   readonly newState: OperationState;
   readonly completed: boolean;
   readonly transition: OperationTransition | undefined;

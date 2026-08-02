@@ -15,6 +15,7 @@ import { MartingaleOneReachedEvent } from '../../core/domain-events/operation/ma
 import { MartingaleTwoReachedEvent } from '../../core/domain-events/operation/martingale-two-reached.event';
 import { OperationLostEvent } from '../../core/domain-events/operation/operation-lost.event';
 import { OperationOpenedEvent } from '../../core/domain-events/operation/operation-opened.event';
+import { OperationTieOccurredEvent } from '../../core/domain-events/operation/operation-tie-occurred.event';
 import { OperationWonEvent } from '../../core/domain-events/operation/operation-won.event';
 import { StrategyTriggeredEvent } from '../../core/domain-events/strategy/strategy-triggered.event';
 import { OperationState } from '../../core/enums/operation-state.enum';
@@ -125,6 +126,12 @@ export class OperationCoordinator implements OnModuleInit, OnModuleDestroy {
 
       if (result.stateChanged) {
         this.publishTransitionEvent(result);
+      }
+
+      if (result.tieOccurred) {
+        this.domainEventBus.publish(
+          new OperationTieOccurredEvent(result.snapshot),
+        );
       }
 
       if (result.completed) {
