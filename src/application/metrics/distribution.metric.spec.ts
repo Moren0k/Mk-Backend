@@ -118,9 +118,7 @@ describe('DistributionMetric', () => {
   });
 
   it('is immutable across calls', () => {
-    fillHistory(historyStore, [
-      buildGame('1', WinnerType.PLAYER),
-    ]);
+    fillHistory(historyStore, [buildGame('1', WinnerType.PLAYER)]);
 
     const first = metric.getSnapshot();
     const second = metric.getSnapshot();

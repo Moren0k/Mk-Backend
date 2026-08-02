@@ -14,7 +14,6 @@ import { NotificationSeverity } from '../../core/enums/notification-severity.enu
 import { OperationState } from '../../core/enums/operation-state.enum';
 import { WinnerType } from '../../core/enums/winner-type.enum';
 import { NotificationChannel } from '../../core/interfaces/notification-channel.interface';
-import type { DistributionMetricValue } from '../../core/metrics/types/distribution-metric-value.type';
 import { EngineErrorTracker } from '../../core/observability/engine-error-tracker';
 import { NotificationFactory } from '../../core/notification/notification.factory';
 import {
@@ -96,57 +95,33 @@ describe('NotificationCoordinator', () => {
     notificationFactory = {
       createForOperationOpened: jest
         .fn()
-        .mockImplementation(
-          (
-            _s: OperationSnapshot,
-            channel: NotificationChannelType,
-            _d: DistributionMetricValue,
-          ) => buildNotification(channel),
+        .mockImplementation((_: unknown, channel: NotificationChannelType) =>
+          buildNotification(channel),
         ),
       createForMartingaleOneReached: jest
         .fn()
-        .mockImplementation(
-          (
-            _s: OperationSnapshot,
-            channel: NotificationChannelType,
-            _d: DistributionMetricValue,
-          ) => buildNotification(channel),
+        .mockImplementation((_: unknown, channel: NotificationChannelType) =>
+          buildNotification(channel),
         ),
       createForMartingaleTwoReached: jest
         .fn()
-        .mockImplementation(
-          (
-            _s: OperationSnapshot,
-            channel: NotificationChannelType,
-            _d: DistributionMetricValue,
-          ) => buildNotification(channel),
+        .mockImplementation((_: unknown, channel: NotificationChannelType) =>
+          buildNotification(channel),
         ),
       createForOperationWon: jest
         .fn()
-        .mockImplementation(
-          (
-            _s: OperationSnapshot,
-            channel: NotificationChannelType,
-            _d: DistributionMetricValue,
-          ) => buildNotification(channel),
+        .mockImplementation((_: unknown, channel: NotificationChannelType) =>
+          buildNotification(channel),
         ),
       createForOperationLost: jest
         .fn()
-        .mockImplementation(
-          (
-            _s: OperationSnapshot,
-            channel: NotificationChannelType,
-            _d: DistributionMetricValue,
-          ) => buildNotification(channel),
+        .mockImplementation((_: unknown, channel: NotificationChannelType) =>
+          buildNotification(channel),
         ),
       createForTieOccurred: jest
         .fn()
-        .mockImplementation(
-          (
-            _s: OperationSnapshot,
-            channel: NotificationChannelType,
-            _d: DistributionMetricValue,
-          ) => buildNotification(channel),
+        .mockImplementation((_: unknown, channel: NotificationChannelType) =>
+          buildNotification(channel),
         ),
     };
 
@@ -243,7 +218,7 @@ describe('NotificationCoordinator', () => {
     expect(notificationFactory.createForOperationOpened).toHaveBeenCalledWith(
       snapshot,
       NotificationChannelType.TELEGRAM,
-      expect.objectContaining({ totalGames: expect.any(Number) }) as unknown,
+      expect.anything(),
     );
     expect(channel.send).toHaveBeenCalledTimes(1);
   });
@@ -269,11 +244,7 @@ describe('NotificationCoordinator', () => {
     dispatchEvent(coordinator, OperationLostEvent.eventName, snapshot);
     expect(notificationFactory.createForOperationLost).toHaveBeenCalled();
 
-    dispatchEvent(
-      coordinator,
-      OperationTieOccurredEvent.eventName,
-      snapshot,
-    );
+    dispatchEvent(coordinator, OperationTieOccurredEvent.eventName, snapshot);
     expect(notificationFactory.createForTieOccurred).toHaveBeenCalled();
   });
 

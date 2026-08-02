@@ -199,9 +199,7 @@ describe('NotificationFactory', () => {
         distribution,
       );
 
-      expect(notification.message).toContain(
-        '🔵 48.50%  🟡 12.00%  🔴 39.50%',
-      );
+      expect(notification.message).toContain('🔵 48.50%  🟡 12.00%  🔴 39.50%');
       expect(notification.title).toContain('Nueva operación');
     });
 
