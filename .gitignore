@@ -1,0 +1,24 @@
+# Dependencias
+node_modules/
+
+# Build
+dist/
+
+# Variables de entorno reales (nunca deben subirse al repositorio)
+.env
+.env.*.local
+
+# Tests
+coverage/
+
+# Logs
+*.log
+
+# Editores / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Configuración local de herramientas (no forma parte del proyecto)
+.claude/
