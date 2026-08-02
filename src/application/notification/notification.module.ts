@@ -4,6 +4,7 @@ import { NOTIFICATION_CHANNELS } from '../../core/constants/injection-tokens.con
 import { NotificationFactory } from '../../core/notification/notification.factory';
 import { TelegramChannel } from '../../infrastructure/telegram/telegram.channel';
 import { DomainEventBusModule } from '../domain-events/domain-event-bus.module';
+import { DistributionMetricModule } from '../metrics/distribution-metric.module';
 import { ErrorTrackingModule } from '../observability/error-tracking.module';
 import { NotificationCoordinator } from './notification.coordinator';
 
@@ -21,7 +22,11 @@ const notificationChannelsProvider: Provider = {
 };
 
 @Module({
-  imports: [DomainEventBusModule, ErrorTrackingModule],
+  imports: [
+    DomainEventBusModule,
+    ErrorTrackingModule,
+    DistributionMetricModule,
+  ],
   providers: [
     NotificationCoordinator,
     NotificationFactory,

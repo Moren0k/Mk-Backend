@@ -1,5 +1,6 @@
 import { NotificationChannelType } from '../enums/notification-channel-type.enum';
 import { NotificationSeverity } from '../enums/notification-severity.enum';
+import type { DistributionMetricValue } from '../metrics/types/distribution-metric-value.type';
 import { OperationSnapshot } from '../operation/types/operation-snapshot.type';
 import { createNotification, Notification } from './notification.type';
 
@@ -33,17 +34,21 @@ export class NotificationFactory {
   createForOperationOpened(
     snapshot: OperationSnapshot,
     channel: NotificationChannelType,
+    distribution?: DistributionMetricValue,
   ): Notification {
     return createNotification({
       channel,
       severity: NotificationSeverity.INFO,
       title: '🚨 Nueva operación',
-      message: [
-        buildOperationSummary(snapshot),
-        `Martingalas máximas: ${snapshot.maxMartingales}`,
-        `Motivo: ${snapshot.reason}`,
-        `Hora: ${formatTime(snapshot.openedAt)}`,
-      ].join('\n'),
+      message: this.appendDistribution(
+        [
+          buildOperationSummary(snapshot),
+          `Martingalas máximas: ${snapshot.maxMartingales}`,
+          `Motivo: ${snapshot.reason}`,
+          `Hora: ${formatTime(snapshot.openedAt)}`,
+        ].join('\n'),
+        distribution,
+      ),
       metadata: { operationId: snapshot.operationId },
     });
   }
@@ -51,36 +56,44 @@ export class NotificationFactory {
   createForMartingaleOneReached(
     snapshot: OperationSnapshot,
     channel: NotificationChannelType,
+    distribution?: DistributionMetricValue,
   ): Notification {
     return this.createForMartingaleReached(
       snapshot,
       channel,
       1,
       '⚠️ Martingala 1',
+      distribution,
     );
   }
 
   createForMartingaleTwoReached(
     snapshot: OperationSnapshot,
     channel: NotificationChannelType,
+    distribution?: DistributionMetricValue,
   ): Notification {
     return this.createForMartingaleReached(
       snapshot,
       channel,
       2,
       '⚠️ Martingala 2',
+      distribution,
     );
   }
 
   createForOperationWon(
     snapshot: OperationSnapshot,
     channel: NotificationChannelType,
+    distribution?: DistributionMetricValue,
   ): Notification {
     return createNotification({
       channel,
       severity: NotificationSeverity.SUCCESS,
       title: '✅ Operación ganada',
-      message: this.buildClosingMessage(snapshot),
+      message: this.appendDistribution(
+        this.buildClosingMessage(snapshot),
+        distribution,
+      ),
       metadata: { operationId: snapshot.operationId },
     });
   }
@@ -88,12 +101,38 @@ export class NotificationFactory {
   createForOperationLost(
     snapshot: OperationSnapshot,
     channel: NotificationChannelType,
+    distribution?: DistributionMetricValue,
   ): Notification {
     return createNotification({
       channel,
       severity: NotificationSeverity.ERROR,
       title: '❌ Operación perdida',
-      message: this.buildClosingMessage(snapshot),
+      message: this.appendDistribution(
+        this.buildClosingMessage(snapshot),
+        distribution,
+      ),
+      metadata: { operationId: snapshot.operationId },
+    });
+  }
+
+  createForTieOccurred(
+    snapshot: OperationSnapshot,
+    channel: NotificationChannelType,
+    distribution?: DistributionMetricValue,
+  ): Notification {
+    return createNotification({
+      channel,
+      severity: NotificationSeverity.WARNING,
+      title: '⚠️ Empate',
+      message: this.appendDistribution(
+        [
+          `Estrategia: ${humanizeStrategyId(snapshot.strategyId)}`,
+          `Entrada: ${snapshot.recommendedWinner}`,
+          `Estado: ${snapshot.currentState}`,
+          `Hora: ${formatTime(new Date())}`,
+        ].join('\n'),
+        distribution,
+      ),
       metadata: { operationId: snapshot.operationId },
     });
   }
@@ -103,6 +142,7 @@ export class NotificationFactory {
     channel: NotificationChannelType,
     martingaleNumber: number,
     title: string,
+    distribution?: DistributionMetricValue,
   ): Notification {
     const lastTransition = snapshot.history[snapshot.history.length - 1];
 
@@ -110,11 +150,14 @@ export class NotificationFactory {
       channel,
       severity: NotificationSeverity.WARNING,
       title,
-      message: [
-        buildOperationSummary(snapshot),
-        `Motivo: ${lastTransition?.reason ?? snapshot.reason}`,
-        `Hora: ${formatTime(lastTransition?.timestamp ?? new Date())}`,
-      ].join('\n'),
+      message: this.appendDistribution(
+        [
+          buildOperationSummary(snapshot),
+          `Motivo: ${lastTransition?.reason ?? snapshot.reason}`,
+          `Hora: ${formatTime(lastTransition?.timestamp ?? new Date())}`,
+        ].join('\n'),
+        distribution,
+      ),
       metadata: { operationId: snapshot.operationId, martingaleNumber },
     });
   }
@@ -125,5 +168,24 @@ export class NotificationFactory {
       `Martingala final: ${snapshot.currentMartingale}`,
       `Hora: ${formatTime(snapshot.closedAt ?? new Date())}`,
     ].join('\n');
+  }
+
+  private appendDistribution(
+    message: string,
+    distribution?: DistributionMetricValue,
+  ): string {
+    if (!distribution) {
+      return message;
+    }
+
+    return `${message}\n\n${this.formatDistribution(distribution)}`;
+  }
+
+  private formatDistribution(distribution: DistributionMetricValue): string {
+    const p = distribution.playerPct.toFixed(2);
+    const t = distribution.tiePct.toFixed(2);
+    const b = distribution.bankerPct.toFixed(2);
+
+    return `🔵 ${p}%  🟡 ${t}%  🔴 ${b}%`;
   }
 }

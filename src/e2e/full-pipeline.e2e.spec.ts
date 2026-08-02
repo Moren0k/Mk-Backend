@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 
 import { EngineMetricsService } from '../application/observability/engine-metrics.service';
 import { StatisticsService } from '../application/statistics/statistics.service';
+import { DistributionMetric } from '../application/metrics/distribution.metric';
 import { NotificationCoordinator } from '../application/notification/notification.coordinator';
 import { ActiveOperationRegistry } from '../application/operation/active-operation-registry';
 import { OperationCoordinator } from '../application/operation/operation.coordinator';
@@ -17,6 +18,7 @@ import { MartingaleOneReachedEvent } from '../core/domain-events/operation/marti
 import { MartingaleTwoReachedEvent } from '../core/domain-events/operation/martingale-two-reached.event';
 import { OperationLostEvent } from '../core/domain-events/operation/operation-lost.event';
 import { OperationOpenedEvent } from '../core/domain-events/operation/operation-opened.event';
+import { OperationTieOccurredEvent } from '../core/domain-events/operation/operation-tie-occurred.event';
 import { OperationWonEvent } from '../core/domain-events/operation/operation-won.event';
 import { StrategyTriggeredEvent } from '../core/domain-events/strategy/strategy-triggered.event';
 import { NotificationChannelType } from '../core/enums/notification-channel-type.enum';
@@ -105,11 +107,13 @@ function buildEngine(): Engine {
     activeOperationRegistry,
   );
   const channel = new FakeNotificationChannel();
+  const distributionMetric = new DistributionMetric(historyStore);
   const notificationCoordinator = new NotificationCoordinator(
     domainEventBus,
     [channel],
     new NotificationFactory(),
     errorTracker,
+    distributionMetric,
   );
   const statisticsService = new StatisticsService(domainEventBus);
   const engineMetricsService = new EngineMetricsService(domainEventBus);
@@ -131,6 +135,7 @@ function buildEngine(): Engine {
     MartingaleTwoReachedEvent.eventName,
     OperationWonEvent.eventName,
     OperationLostEvent.eventName,
+    OperationTieOccurredEvent.eventName,
     NotificationSentEvent.eventName,
     NotificationFailedEvent.eventName,
   ]) {
@@ -204,9 +209,15 @@ describe('Full pipeline (e2e, no real API)', () => {
       StrategyTriggeredEvent.eventName,
       OperationOpenedEvent.eventName,
       NotificationSentEvent.eventName,
+      OperationTieOccurredEvent.eventName,
+      NotificationSentEvent.eventName,
       MartingaleOneReachedEvent.eventName,
       NotificationSentEvent.eventName,
+      OperationTieOccurredEvent.eventName,
+      NotificationSentEvent.eventName,
       MartingaleTwoReachedEvent.eventName,
+      NotificationSentEvent.eventName,
+      OperationTieOccurredEvent.eventName,
       NotificationSentEvent.eventName,
       OperationWonEvent.eventName,
       NotificationSentEvent.eventName,
@@ -228,10 +239,16 @@ describe('Full pipeline (e2e, no real API)', () => {
     expect(snapshot.history).toHaveLength(3); // OPEN->MG1, MG1->MG2, MG2->WON
     expect(engine.operationCoordinator.activeCount()).toBe(0);
 
-    // Notificaciones: 4 en total (abierta, MG1, MG2, ganada), todas entregadas.
-    expect(engine.channel.sent).toHaveLength(4);
+    // Notificaciones: 7 en total (abierta, 3 ties, MG1, MG2, ganada), todas entregadas.
+    expect(engine.channel.sent).toHaveLength(7);
     expect(engine.channel.sent[0].title).toContain('Nueva operación');
-    expect(engine.channel.sent[3].title).toContain('ganada');
+    expect(engine.channel.sent[1].title).toContain('Empate');
+    expect(engine.channel.sent[6].title).toContain('ganada');
+
+    // La primera notificación debe incluir la línea de distribución.
+    expect(engine.channel.sent[0].message).toContain('🔵');
+    expect(engine.channel.sent[0].message).toContain('🟡');
+    expect(engine.channel.sent[0].message).toContain('🔴');
 
     // Estadísticas.
     const statistics = engine.statisticsService.getSnapshot();
@@ -253,7 +270,7 @@ describe('Full pipeline (e2e, no real API)', () => {
       operationsLost: 0,
       martingaleOneReachedCount: 1,
       martingaleTwoReachedCount: 1,
-      notificationsSent: 4,
+      notificationsSent: 7,
       notificationsFailed: 0,
     });
   });
@@ -279,9 +296,15 @@ describe('Full pipeline (e2e, no real API)', () => {
       StrategyTriggeredEvent.eventName,
       OperationOpenedEvent.eventName,
       NotificationSentEvent.eventName,
+      OperationTieOccurredEvent.eventName,
+      NotificationSentEvent.eventName,
       MartingaleOneReachedEvent.eventName,
       NotificationSentEvent.eventName,
+      OperationTieOccurredEvent.eventName,
+      NotificationSentEvent.eventName,
       MartingaleTwoReachedEvent.eventName,
+      NotificationSentEvent.eventName,
+      OperationTieOccurredEvent.eventName,
       NotificationSentEvent.eventName,
       OperationLostEvent.eventName,
       NotificationSentEvent.eventName,
@@ -302,9 +325,11 @@ describe('Full pipeline (e2e, no real API)', () => {
     expect(engine.operationCoordinator.activeCount()).toBe(0);
 
     // Notificaciones.
-    expect(engine.channel.sent).toHaveLength(4);
-    expect(engine.channel.sent[3].title).toContain('perdida');
-    expect(engine.channel.sent[3].severity).toBeDefined();
+    expect(engine.channel.sent).toHaveLength(7);
+    expect(engine.channel.sent[1].title).toContain('Empate');
+    expect(engine.channel.sent[6].title).toContain('perdida');
+    expect(engine.channel.sent[6].severity).toBeDefined();
+    expect(engine.channel.sent[0].message).toContain('🔵');
 
     // Estadísticas.
     const statistics = engine.statisticsService.getSnapshot();
@@ -326,7 +351,7 @@ describe('Full pipeline (e2e, no real API)', () => {
       operationsLost: 1,
       martingaleOneReachedCount: 1,
       martingaleTwoReachedCount: 1,
-      notificationsSent: 4,
+      notificationsSent: 7,
       notificationsFailed: 0,
     });
   });

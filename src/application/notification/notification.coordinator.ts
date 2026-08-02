@@ -17,19 +17,23 @@ import { MartingaleOneReachedEvent } from '../../core/domain-events/operation/ma
 import { MartingaleTwoReachedEvent } from '../../core/domain-events/operation/martingale-two-reached.event';
 import { OperationLostEvent } from '../../core/domain-events/operation/operation-lost.event';
 import { OperationOpenedEvent } from '../../core/domain-events/operation/operation-opened.event';
+import { OperationTieOccurredEvent } from '../../core/domain-events/operation/operation-tie-occurred.event';
 import { OperationWonEvent } from '../../core/domain-events/operation/operation-won.event';
 import { NotificationFailedEvent } from '../../core/domain-events/notification/notification-failed.event';
 import { NotificationSentEvent } from '../../core/domain-events/notification/notification-sent.event';
 import { NotificationChannelType } from '../../core/enums/notification-channel-type.enum';
 import type { NotificationChannel } from '../../core/interfaces/notification-channel.interface';
+import type { DistributionMetricValue } from '../../core/metrics/types/distribution-metric-value.type';
 import { EngineErrorTracker } from '../../core/observability/engine-error-tracker';
 import { NotificationFactory } from '../../core/notification/notification.factory';
 import { Notification } from '../../core/notification/notification.type';
 import { OperationSnapshot } from '../../core/operation/types/operation-snapshot.type';
+import { DistributionMetric } from '../metrics/distribution.metric';
 
 type NotificationBuilder = (
   snapshot: OperationSnapshot,
   channel: NotificationChannelType,
+  distribution: DistributionMetricValue,
 ) => Notification;
 
 type EventClass = { readonly eventName: string };
@@ -61,30 +65,62 @@ export class NotificationCoordinator implements OnModuleInit, OnModuleDestroy {
     private readonly channels: readonly NotificationChannel[],
     private readonly notificationFactory: NotificationFactory,
     private readonly errorTracker: EngineErrorTracker,
+    private readonly distributionMetric: DistributionMetric,
   ) {
-    // Tabla en vez de 5 pares de campos casi idénticos: agregar un evento
-    // de Operation nuevo es sumar una línea aquí, nunca duplicar el resto.
     this.subscriptions = [
-      this.buildSubscription(OperationOpenedEvent, (snapshot, channel) =>
-        this.notificationFactory.createForOperationOpened(snapshot, channel),
+      this.buildSubscription(
+        OperationOpenedEvent,
+        (snapshot, channel, distribution) =>
+          this.notificationFactory.createForOperationOpened(
+            snapshot,
+            channel,
+            distribution,
+          ),
       ),
-      this.buildSubscription(MartingaleOneReachedEvent, (snapshot, channel) =>
-        this.notificationFactory.createForMartingaleOneReached(
-          snapshot,
-          channel,
-        ),
+      this.buildSubscription(
+        MartingaleOneReachedEvent,
+        (snapshot, channel, distribution) =>
+          this.notificationFactory.createForMartingaleOneReached(
+            snapshot,
+            channel,
+            distribution,
+          ),
       ),
-      this.buildSubscription(MartingaleTwoReachedEvent, (snapshot, channel) =>
-        this.notificationFactory.createForMartingaleTwoReached(
-          snapshot,
-          channel,
-        ),
+      this.buildSubscription(
+        MartingaleTwoReachedEvent,
+        (snapshot, channel, distribution) =>
+          this.notificationFactory.createForMartingaleTwoReached(
+            snapshot,
+            channel,
+            distribution,
+          ),
       ),
-      this.buildSubscription(OperationWonEvent, (snapshot, channel) =>
-        this.notificationFactory.createForOperationWon(snapshot, channel),
+      this.buildSubscription(
+        OperationWonEvent,
+        (snapshot, channel, distribution) =>
+          this.notificationFactory.createForOperationWon(
+            snapshot,
+            channel,
+            distribution,
+          ),
       ),
-      this.buildSubscription(OperationLostEvent, (snapshot, channel) =>
-        this.notificationFactory.createForOperationLost(snapshot, channel),
+      this.buildSubscription(
+        OperationLostEvent,
+        (snapshot, channel, distribution) =>
+          this.notificationFactory.createForOperationLost(
+            snapshot,
+            channel,
+            distribution,
+          ),
+      ),
+      this.buildSubscription(
+        OperationTieOccurredEvent,
+        (snapshot, channel, distribution) =>
+          this.notificationFactory.createForTieOccurred(
+            snapshot,
+            channel,
+            distribution,
+          ),
       ),
     ];
   }
@@ -126,6 +162,8 @@ export class NotificationCoordinator implements OnModuleInit, OnModuleDestroy {
     snapshot: OperationSnapshot,
     buildNotification: NotificationBuilder,
   ): void {
+    const distribution = this.distributionMetric.getSnapshot();
+
     for (const channel of this.channels) {
       if (!channel.enabled()) {
         continue;
@@ -134,6 +172,7 @@ export class NotificationCoordinator implements OnModuleInit, OnModuleDestroy {
       const notification = buildNotification(
         snapshot,
         channel.getChannelType(),
+        distribution,
       );
 
       if (!channel.supports(notification)) {
