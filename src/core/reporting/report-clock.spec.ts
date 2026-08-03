@@ -1,8 +1,6 @@
 import {
   formatBogotaHourLabel,
   getBogotaHour,
-  getDailyWindowStart,
-  getNextDailyReportBoundary,
   getNextHourBoundary,
   isOperatingHour,
 } from './report-clock';
@@ -67,46 +65,6 @@ describe('report-clock', () => {
 
     it('is false right after midnight Bogotá, 00:00 (05:00 UTC)', () => {
       expect(isOperatingHour(new Date('2026-08-01T05:00:00.000Z'))).toBe(false);
-    });
-  });
-
-  describe('getNextDailyReportBoundary', () => {
-    it('returns 22:00 Bogotá today (as UTC) when still earlier that day', () => {
-      // now = 21:00 Bogotá del 31/07 (02:00 UTC del 01/08)
-      const now = new Date('2026-08-01T02:00:00.000Z');
-
-      expect(getNextDailyReportBoundary(now).toISOString()).toBe(
-        '2026-08-01T03:00:00.000Z',
-      );
-    });
-
-    it('rolls over to tomorrow when already past 22:00 Bogotá today', () => {
-      // now = 23:00 Bogotá del 31/07 (04:00 UTC del 01/08)
-      const now = new Date('2026-08-01T04:00:00.000Z');
-
-      expect(getNextDailyReportBoundary(now).toISOString()).toBe(
-        '2026-08-02T03:00:00.000Z',
-      );
-    });
-
-    it('rolls over to tomorrow when called exactly at the boundary', () => {
-      const now = new Date('2026-08-01T03:00:00.000Z');
-
-      expect(getNextDailyReportBoundary(now).toISOString()).toBe(
-        '2026-08-02T03:00:00.000Z',
-      );
-    });
-  });
-
-  describe('getDailyWindowStart', () => {
-    it('returns 10:00 Bogotá of the same Bogotá calendar day as the tick', () => {
-      // tick a las 22:00 Bogotá del 31/07 (03:00 UTC del 01/08)
-      const dailyEnd = new Date('2026-08-01T03:00:00.000Z');
-
-      // 10:00 Bogotá del 31/07 = 15:00 UTC del 31/07
-      expect(getDailyWindowStart(dailyEnd).toISOString()).toBe(
-        '2026-07-31T15:00:00.000Z',
-      );
     });
   });
 

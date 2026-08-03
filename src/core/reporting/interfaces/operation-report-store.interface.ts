@@ -7,6 +7,11 @@ import { OperationOpenedRecord } from '../types/operation-opened-record.type';
  * (InMemoryOperationReportStore); el día que exista base de datos, basta
  * con una nueva implementación de este contrato y cambiar el provider en
  * ReportingModule — ReportScheduler y OperationReportRecorder no cambian.
+ *
+ * Nunca se eliminan registros: no existe ningún método de limpieza. El
+ * historial completo (`getAllOpened`/`getAllClosed`) es la fuente del
+ * resumen bajo demanda (ver SummaryReportService) y crece sin límite
+ * mientras el proceso siga vivo.
  */
 export interface OperationReportStore {
   recordOpened(record: OperationOpenedRecord): void;
@@ -18,7 +23,9 @@ export interface OperationReportStore {
   /** Cierres con `closedAt` en `[from, to)`. */
   getClosedBetween(from: Date, to: Date): ReadonlyArray<OperationClosedRecord>;
 
-  /** Elimina todos los registros. Se usa tras el reporte diario: ya fueron
-   *  reportados (horario + diario) y no hace falta conservarlos. */
-  clear(): void;
+  /** Todas las aperturas registradas desde que inició el proceso. */
+  getAllOpened(): ReadonlyArray<OperationOpenedRecord>;
+
+  /** Todos los cierres registrados desde que inició el proceso. */
+  getAllClosed(): ReadonlyArray<OperationClosedRecord>;
 }

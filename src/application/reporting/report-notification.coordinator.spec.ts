@@ -1,7 +1,6 @@
 import { Logger } from '@nestjs/common';
 
 import { DomainEventBus } from '../../core/domain-events/base/domain-event-bus.interface';
-import { DailyReportGeneratedEvent } from '../../core/domain-events/reporting/daily-report-generated.event';
 import { HourlyReportGeneratedEvent } from '../../core/domain-events/reporting/hourly-report-generated.event';
 import { NotificationChannelType } from '../../core/enums/notification-channel-type.enum';
 import { NotificationSeverity } from '../../core/enums/notification-severity.enum';
@@ -12,13 +11,11 @@ import {
   Notification,
 } from '../../core/notification/notification.type';
 import { EngineErrorTracker } from '../../core/observability/engine-error-tracker';
-import { ReportKind } from '../../core/reporting/types/report-kind.enum';
 import { ReportSnapshot } from '../../core/reporting/types/report-snapshot.type';
 import { ReportNotificationCoordinator } from './report-notification.coordinator';
 
 function buildReport(overrides: Partial<ReportSnapshot> = {}): ReportSnapshot {
   return {
-    kind: ReportKind.HOURLY,
     windowFrom: new Date('2026-08-01T15:00:00.000Z'),
     windowTo: new Date('2026-08-01T16:00:00.000Z'),
     metrics: {
@@ -67,7 +64,7 @@ function buildChannel(
 describe('ReportNotificationCoordinator', () => {
   let domainEventBus: jest.Mocked<DomainEventBus>;
   let notificationFactory: jest.Mocked<
-    Pick<NotificationFactory, 'createForHourlyReport' | 'createForDailyReport'>
+    Pick<NotificationFactory, 'createForHourlyReport'>
   >;
   let errorTracker: EngineErrorTracker;
 
@@ -83,11 +80,6 @@ describe('ReportNotificationCoordinator', () => {
     };
     notificationFactory = {
       createForHourlyReport: jest
-        .fn()
-        .mockImplementation((_: unknown, channel: NotificationChannelType) =>
-          buildNotification(channel),
-        ),
-      createForDailyReport: jest
         .fn()
         .mockImplementation((_: unknown, channel: NotificationChannelType) =>
           buildNotification(channel),
@@ -121,15 +113,10 @@ describe('ReportNotificationCoordinator', () => {
       ([name]) => name === eventName,
     )![1];
 
-    const event =
-      eventName === HourlyReportGeneratedEvent.eventName
-        ? new HourlyReportGeneratedEvent(report)
-        : new DailyReportGeneratedEvent(report);
-
-    handler.handle(event);
+    handler.handle(new HourlyReportGeneratedEvent(report));
   }
 
-  it('subscribes to both report events on module init', () => {
+  it('subscribes to the hourly report event on module init', () => {
     const coordinator = build([]);
 
     coordinator.onModuleInit();
@@ -138,19 +125,15 @@ describe('ReportNotificationCoordinator', () => {
       HourlyReportGeneratedEvent.eventName,
       expect.anything(),
     );
-    expect(domainEventBus.subscribe).toHaveBeenCalledWith(
-      DailyReportGeneratedEvent.eventName,
-      expect.anything(),
-    );
   });
 
-  it('unsubscribes both handlers on module destroy, using the same references', () => {
+  it('unsubscribes the handler on module destroy, using the same reference', () => {
     const coordinator = build([]);
     coordinator.onModuleInit();
 
     coordinator.onModuleDestroy();
 
-    expect(domainEventBus.unsubscribe).toHaveBeenCalledTimes(2);
+    expect(domainEventBus.unsubscribe).toHaveBeenCalledTimes(1);
     for (const [eventName, handler] of domainEventBus.subscribe.mock.calls) {
       expect(domainEventBus.unsubscribe).toHaveBeenCalledWith(
         eventName,
@@ -170,22 +153,6 @@ describe('ReportNotificationCoordinator', () => {
       report,
       NotificationChannelType.TELEGRAM,
     );
-    expect(notificationFactory.createForDailyReport).not.toHaveBeenCalled();
-    expect(channel.send).toHaveBeenCalledTimes(1);
-  });
-
-  it('routes DailyReportGeneratedEvent to createForDailyReport and sends it', () => {
-    const channel = buildChannel();
-    const coordinator = build([channel]);
-    const report = buildReport({ kind: ReportKind.DAILY });
-
-    dispatchEvent(coordinator, DailyReportGeneratedEvent.eventName, report);
-
-    expect(notificationFactory.createForDailyReport).toHaveBeenCalledWith(
-      report,
-      NotificationChannelType.TELEGRAM,
-    );
-    expect(notificationFactory.createForHourlyReport).not.toHaveBeenCalled();
     expect(channel.send).toHaveBeenCalledTimes(1);
   });
 

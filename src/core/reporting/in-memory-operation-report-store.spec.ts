@@ -75,15 +75,17 @@ describe('InMemoryOperationReportStore', () => {
     expect(result).toHaveLength(1);
   });
 
-  it('clear() empties both opened and closed records', () => {
+  it('getAllOpened() returns every opened record ever recorded, regardless of time', () => {
     store.recordOpened(buildOpened('2026-08-01T13:00:00.000Z'));
+    store.recordOpened(buildOpened('2026-08-03T09:00:00.000Z'));
+
+    expect(store.getAllOpened()).toHaveLength(2);
+  });
+
+  it('getAllClosed() returns every closed record ever recorded, regardless of time', () => {
     store.recordClosed(buildClosed('2026-08-01T13:30:00.000Z'));
+    store.recordClosed(buildClosed('2026-08-03T09:30:00.000Z'));
 
-    store.clear();
-
-    const from = new Date('2026-08-01T00:00:00.000Z');
-    const to = new Date('2026-08-02T00:00:00.000Z');
-    expect(store.getOpenedBetween(from, to)).toEqual([]);
-    expect(store.getClosedBetween(from, to)).toEqual([]);
+    expect(store.getAllClosed()).toHaveLength(2);
   });
 });

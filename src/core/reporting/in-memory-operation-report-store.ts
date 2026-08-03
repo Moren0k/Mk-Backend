@@ -4,9 +4,10 @@ import { OperationOpenedRecord } from './types/operation-opened-record.type';
 
 /**
  * Implementación en memoria de OperationReportStore: dos arreglos simples,
- * sin límite de tamaño propio (a diferencia de HistoryStore) porque
- * ReportScheduler los vacía por completo tras cada reporte diario (ver
- * `clear()`), acotando el crecimiento a lo sumo a un día de operaciones.
+ * sin límite de tamaño ni mecanismo de limpieza — crecen mientras el
+ * proceso siga vivo. Es intencional: `getAllOpened`/`getAllClosed` son la
+ * fuente del resumen completo bajo demanda (ver SummaryReportService), que
+ * debe poder reflejar absolutamente todo lo ocurrido desde el arranque.
  *
  * Ningún consumidor externo debe importar esta clase directamente, solo el
  * contrato OperationReportStore (mismo patrón que InMemoryHistoryStore e
@@ -36,8 +37,11 @@ export class InMemoryOperationReportStore implements OperationReportStore {
     );
   }
 
-  clear(): void {
-    this.opened.length = 0;
-    this.closed.length = 0;
+  getAllOpened(): ReadonlyArray<OperationOpenedRecord> {
+    return [...this.opened];
+  }
+
+  getAllClosed(): ReadonlyArray<OperationClosedRecord> {
+    return [...this.closed];
   }
 }

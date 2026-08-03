@@ -1,6 +1,5 @@
 import {
   BOGOTA_UTC_OFFSET_HOURS,
-  DAILY_REPORT_HOUR,
   ONE_HOUR_MS,
   OPERATING_START_HOUR,
 } from './reporting.constants';
@@ -17,7 +16,7 @@ function toBogotaWallClock(instant: Date): Date {
 }
 
 /** Inversa de `toBogotaWallClock`: vuelve del reloj de Bogotá al instante real (UTC). */
-function fromBogotaWallClock(wallClock: Date): Date {
+export function fromBogotaWallClock(wallClock: Date): Date {
   return new Date(wallClock.getTime() - BOGOTA_UTC_OFFSET_HOURS * ONE_HOUR_MS);
 }
 
@@ -50,34 +49,31 @@ export function isOperatingHour(hourStart: Date): boolean {
   return getBogotaHour(hourStart) >= OPERATING_START_HOUR;
 }
 
-/** Próximo instante real en el que son las 22:00 hora de Bogotá (hoy o mañana). */
-export function getNextDailyReportBoundary(now: Date): Date {
-  const nowInBogota = toBogotaWallClock(now);
-  const candidate = new Date(nowInBogota);
-  candidate.setUTCHours(DAILY_REPORT_HOUR, 0, 0, 0);
-
-  if (candidate.getTime() <= nowInBogota.getTime()) {
-    candidate.setUTCDate(candidate.getUTCDate() + 1);
-  }
-
-  return fromBogotaWallClock(candidate);
-}
-
-/**
- * Instante real de las 10:00 hora de Bogotá del mismo día de calendario
- * (en Bogotá) que `instant`. Pensado para construir la ventana del reporte
- * diario a partir del instante en que este se dispara (~22:00 Bogotá).
- */
-export function getDailyWindowStart(instant: Date): Date {
-  const inBogota = toBogotaWallClock(instant);
-  const start = new Date(inBogota);
-  start.setUTCHours(OPERATING_START_HOUR, 0, 0, 0);
-  return fromBogotaWallClock(start);
-}
-
 /** Etiqueta "HH:MM" en hora de Bogotá, para mostrar en los reportes. */
 export function formatBogotaHourLabel(instant: Date): string {
   const bogota = toBogotaWallClock(instant);
   const pad = (value: number): string => value.toString().padStart(2, '0');
   return `${pad(bogota.getUTCHours())}:${pad(bogota.getUTCMinutes())}`;
+}
+
+/**
+ * Clave estable que identifica el bloque horario de Bogotá (día + hora) al
+ * que pertenece `instant`. Pensada para agrupar registros de un historial
+ * que puede abarcar varios días (a diferencia de `getBogotaHour`, que solo
+ * da la hora 0-23 y mezclaría el mismo "14:00" de días distintos).
+ */
+export function getBogotaHourBucketKey(instant: Date): string {
+  const bogota = toBogotaWallClock(instant);
+  const pad = (value: number): string => value.toString().padStart(2, '0');
+  return (
+    `${bogota.getUTCFullYear()}-${pad(bogota.getUTCMonth() + 1)}-` +
+    `${pad(bogota.getUTCDate())}T${pad(bogota.getUTCHours())}`
+  );
+}
+
+/** Etiqueta legible "DD/MM HH:00" (hora de Bogotá) para un bucket horario. */
+export function formatBogotaDateHourLabel(instant: Date): string {
+  const bogota = toBogotaWallClock(instant);
+  const pad = (value: number): string => value.toString().padStart(2, '0');
+  return `${pad(bogota.getUTCDate())}/${pad(bogota.getUTCMonth() + 1)} ${pad(bogota.getUTCHours())}:00`;
 }
