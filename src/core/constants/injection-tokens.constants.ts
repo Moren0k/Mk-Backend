@@ -10,3 +10,4 @@ export const DOMAIN_EVENT_BUS = Symbol('DomainEventBus');
 export const STRATEGIES = Symbol('Strategies');
 export const NOTIFICATION_CHANNELS = Symbol('NotificationChannels');
 export const STRATEGY_EXECUTION_GUARD = Symbol('StrategyExecutionGuard');
+export const OPERATION_REPORT_STORE = Symbol('OperationReportStore');
