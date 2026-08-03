@@ -4,19 +4,26 @@ Motor de procesamiento de eventos en tiempo real que analiza las jugadas de **Ba
 
 No es un CRUD: todo el sistema gira alrededor de un único disparador — **llega una jugada nueva** — y se comunica internamente mediante un bus de eventos de dominio, sin que ningún componente conozca a otro directamente.
 
-Para el detalle completo de la arquitectura (capas, decisiones de diseño, análisis de rendimiento) ver [`ARCHITECTURE.md`](./ARCHITECTURE.md). Para el contrato de la API de Tipminer, ver [`API.MD`](./API.MD).
+Para el detalle completo de la arquitectura (capas, decisiones de diseño, análisis de rendimiento, formato de notificaciones) ver [`ARCHITECTURE.md`](./ARCHITECTURE.md). Para el contrato de la API de Tipminer, ver [`API.MD`](./API.MD).
 
 ## Qué hace
 
 1. Escucha las jugadas de BacBo en vivo (SSE) y carga un historial inicial (HTTP).
 2. Evalúa estrategias sobre ese historial — hoy, `Streak3Strategy`: cuando una racha de 3 resultados iguales (PLAYER o BANKER) aparece, recomienda apostar al resultado opuesto.
 3. Abre una operación simulada con hasta 2 pasos de martingala (MG1, MG2) y la sigue hasta que gana o pierde.
-4. Notifica cada evento relevante (apertura, martingala, victoria, derrota) por Telegram.
-5. Lleva estadísticas y métricas del motor completo, incluyendo el historial cargado al arrancar.
+4. **Notifica cada evento relevante por Telegram** con formato personalizado:
+   - 🚨 Entrada con la última jugada de la racha (`streakWinner`) y la apuesta recomendada
+   - 🔁 Martingala 1 y 2 con indicador de bola (🔵 = PLAYER, 🔴 = BANKER)
+   - 🟰 Empate (TIE) — visible pero no consume martingala
+   - ✅ Victoria o ❌ Derrota con resumen final
+   - Todos los mensajes incluyen la distribución de las últimas 200 partidas (`🔵 xx% 🟡 xx% 🔴 xx%`)
+5. **Limpia automáticamente los mensajes intermedios** (MG1, MG2, TIE) 4 segundos después de que la operación cierra, dejando solo la entrada y el resultado final visibles en Telegram.
+6. Lleva estadísticas y métricas del motor completo, incluyendo el historial cargado al arrancar.
 
 **Salvaguardas del motor de estrategias:**
 - Nunca hay dos operaciones activas simultáneas para la misma estrategia (`StrategyExecutionGuard` / `ActiveOperationRegistry`).
 - Una misma racha nunca genera más de una señal, sin importar cuánto se extienda ni si la operación anterior ya se resolvió — solo una racha nueva (cortada por un TIE o un cambio de ganador) vuelve a habilitar la señal (`StrategyRuntimeState`).
+- Los TIE notifican al usuario pero nunca cambian el estado de la operación ni consumen martingala.
 
 ## Requisitos
 
@@ -47,8 +54,6 @@ pnpm start:dev
 | `TIPMINER_TIMEZONE` | Timezone usada al pedir el historial. Opcional. |
 | `TIPMINER_API_KEY` | Reservado para cuando la API deje de ser pública; hoy no se usa. |
 
-Ver `.env.example` para más detalle.
-
 ### Scripts
 
 | Comando | Qué hace |
@@ -61,88 +66,59 @@ Ver `.env.example` para más detalle.
 
 ## Flujo del sistema
 
-```plantuml
-@startuml
-title Mk-Backend — de una jugada nueva a una notificación en Telegram
-
-participant "Tipminer\n(SSE / HTTP)" as Tipminer
-participant "GameEventCollector" as Collector
-participant "HistoryStore" as History
-participant "DomainEventBus" as Bus
-participant "StrategyCoordinator" as StratCoord
-participant "Streak3Strategy" as Streak3
-participant "ActiveOperationRegistry\n(StrategyExecutionGuard)" as Guard
-participant "StrategyRuntimeState" as RunState
-participant "OperationCoordinator" as OpCoord
-participant "Operation" as Operation
-participant "NotificationCoordinator" as NotifCoord
-participant "TelegramChannel" as Telegram
-participant "StatisticsService /\nEngineMetricsService" as Stats
-
-Tipminer -> Collector : nueva jugada
-Collector -> History : append(game)
-Collector -> Bus : publish(GameReceivedEvent{game, isHistorical})
-
-Bus -> Stats : handle(event)\n(cuenta todo, incl. histórico)
-
-alt isHistorical == true
-  note over StratCoord
-    Ignorada por completo: una racha
-    de hace horas no es accionable.
-  end note
-else en vivo
-  Bus -> StratCoord : handle(event)
-  StratCoord -> Streak3 : evaluate(context)
-
-  Streak3 -> Guard : canExecute("streak-3")
-  Guard --> Streak3 : true (sin operación activa)
-
-  Streak3 -> History : historySnapshot.getAll()
-  Streak3 -> RunState : get("streak-3")
-  note right of Streak3
-    ¿Racha de 3 iguales?
-    ¿Es una racha distinta a
-    la última ya señalada?
-  end note
-
-  opt racha nueva de longitud >= 3
-    Streak3 -> RunState : set("streak-3", startGameUuid)
-    Streak3 --> StratCoord : StrategySignal (triggered)
-    StratCoord -> Bus : publish(StrategyTriggeredEvent)
-
-    Bus -> OpCoord : onStrategyTriggered(event)
-    OpCoord -> Operation : Operation.open(signal)
-    OpCoord -> Guard : register(operation)
-    OpCoord -> Bus : publish(OperationOpenedEvent)
-    Bus -> NotifCoord : handle(event)
-    NotifCoord -> Telegram : send(notification)
-  end
-end
-
-== En cada jugada siguiente, mientras haya operaciones activas ==
-Bus -> OpCoord : handle(GameReceivedEvent)
-OpCoord -> Operation : update(game)
-Operation --> OpCoord : MG1 / MG2 / WON / LOST
-OpCoord -> Bus : publish(evento correspondiente)
-opt WON o LOST
-  OpCoord -> Guard : unregister(operationId)
-end
-Bus -> NotifCoord : handle(evento)
-NotifCoord -> Telegram : send(notification)
-
-@enduml
 ```
-
-Pega el bloque anterior en [PlantUML Online](https://www.plantuml.com/plantuml) (o cualquier visor/plugin de PlantUML) para verlo renderizado.
+Tipminer (SSE/HTTP)
+    │
+    ▼
+GameEventCollector → HistoryStore → GameReceivedEvent
+    │
+    ├── StrategyCoordinator → Streak3Strategy → StrategyTriggeredEvent
+    │                                                        │
+    │                                              (recommendedWinner + streakWinner)
+    │                                                        │
+    ├── OperationCoordinator → Operation.open() → OperationOpenedEvent
+    │   └── update(game) → MG1 / MG2 / TIE / WON / LOST
+    │                                                        │
+    └── NotificationCoordinator
+        ├── distributionMetric.getSnapshot() → porcentajes
+        ├── NotificationFactory → mensajes con bolas (🔵P / 🔴B)
+        ├── channelDispatcher.dispatchToAll(send, onSent?)
+        │   └── (MG1/MG2/TIE) → MessageTracker.register(messageId)
+        └── (WON/LOST) → setTimeout(4s) → borrar MG1/MG2/TIE
+            └── channel.deleteMessage(messageId) [fire-and-forget]
+```
 
 ## Estructura del proyecto
 
 ```
 src/
-├── core/            TypeScript puro, sin NestJS, sin dependencias de otras capas.
-├── application/      Orquestación (coordinadores, servicios). Depende solo de core.
-├── infrastructure/    Integraciones externas (Tipminer, Telegram). Depende de core y application.
-└── e2e/              Test end-to-end del pipeline completo, sin la API real.
+├── core/
+│   ├── constants/          Tokens DI, MAX_HISTORY_SIZE
+│   ├── domain-events/      Eventos de dominio (10 eventos)
+│   ├── enums/              WinnerType, OperationState, etc.
+│   ├── history/            RingBuffer, Game, InMemoryHistoryStore
+│   ├── interfaces/         HistoryStore, HistorySnapshot, NotificationChannel
+│   ├── metrics/            DistributionMetricValue (value object)
+│   ├── notification/       Notification, NotificationFactory, SendResult, MessageType
+│   ├── observability/      EngineMetrics, EngineErrorTracker
+│   ├── operation/          Operation (aggregate root), OperationSnapshot, OperationUpdateResult
+│   ├── shared/             round-percentage, take-last
+│   ├── statistics/         Statistics (contadores incrementales)
+│   └── strategy/           Strategy interface, Streak3Strategy, StrategySignal
+├── application/
+│   ├── history/            HistoryModule
+│   ├── metrics/            DistributionMetric, DistributionMetricModule
+│   ├── notification/       NotificationCoordinator, NotificationChannelDispatcher, MessageTracker
+│   ├── observability/      EngineMetricsService, EngineHealth
+│   ├── operation/          OperationCoordinator, ActiveOperationRegistry
+│   ├── statistics/         StatisticsService
+│   └── strategy/           StrategyCoordinator, StrategyModule
+├── infrastructure/
+│   ├── collector/          GameEventCollector, SSE client, GameMapper
+│   ├── config/             AppConfigModule
+│   ├── shared/             sleep utility
+│   └── telegram/           TelegramChannel, MarkdownV2 escaping, retry constants
+└── e2e/                    Test end-to-end del pipeline completo
 ```
 
 Detalle completo de capas, eventos, módulos NestJS y decisiones de diseño en [`ARCHITECTURE.md`](./ARCHITECTURE.md).

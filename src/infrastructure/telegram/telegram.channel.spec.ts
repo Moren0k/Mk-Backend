@@ -45,6 +45,7 @@ describe('TelegramChannel', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     fetchMock = jest.fn();
     jest.spyOn(globalThis, 'fetch').mockImplementation(fetchMock);
   });
@@ -80,20 +81,25 @@ describe('TelegramChannel', () => {
     expect(channel.supports(buildNotification())).toBe(true);
   });
 
-  it('sends a POST to the official sendMessage endpoint with MarkdownV2 text', async () => {
-    fetchMock.mockResolvedValue({ ok: true, status: 200 });
+  it('sends a POST to sendMessage and returns SendResult with messageId', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: jest.fn().mockResolvedValue({ result: { message_id: 456 } }),
+    });
     const channel = new TelegramChannel(
       buildConfigService({ botToken: 'ABC123', chatId: '-999' }),
     );
 
-    const delivered = await channel.send(
+    const result = await channel.send(
       buildNotification({
         title: 'Nueva operación',
         message: 'Racha de 3 (streak) - test!',
       }),
     );
 
-    expect(delivered).toBe(true);
+    expect(result.delivered).toBe(true);
+    expect(result.messageId).toBe(456);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
 
@@ -112,7 +118,7 @@ describe('TelegramChannel', () => {
     );
   });
 
-  it('retries up to MAX_SEND_ATTEMPTS times and then gives up without throwing', async () => {
+  it('retries up to MAX_SEND_ATTEMPTS times and then returns delivered=false', async () => {
     fetchMock.mockResolvedValue({
       ok: false,
       status: 500,
@@ -122,15 +128,11 @@ describe('TelegramChannel', () => {
 
     const sendPromise = channel.send(buildNotification());
     await jest.advanceTimersByTimeAsync(RETRY_DELAY_MS * MAX_SEND_ATTEMPTS);
-    await expect(sendPromise).resolves.toBe(false);
+    const result = await sendPromise;
 
+    expect(result.delivered).toBe(false);
+    expect(result.messageId).toBeUndefined();
     expect(fetchMock).toHaveBeenCalledTimes(MAX_SEND_ATTEMPTS);
-    expect(Logger.prototype.error).toHaveBeenCalledWith(
-      expect.stringContaining('Intento'),
-      expect.objectContaining({
-        message: expect.stringContaining('boom') as string,
-      }),
-    );
   });
 
   it('surfaces the response body Telegram sent back, so the real cause of a 400 is visible', async () => {
@@ -164,13 +166,19 @@ describe('TelegramChannel', () => {
         status: 500,
         text: jest.fn().mockResolvedValue(''),
       })
-      .mockResolvedValueOnce({ ok: true, status: 200 });
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: jest.fn().mockResolvedValue({ result: { message_id: 1 } }),
+      });
     const channel = new TelegramChannel(buildConfigService());
 
     const sendPromise = channel.send(buildNotification());
     await jest.advanceTimersByTimeAsync(RETRY_DELAY_MS);
+    const result = await sendPromise;
 
-    await expect(sendPromise).resolves.toBe(true);
+    expect(result.delivered).toBe(true);
+    expect(result.messageId).toBe(1);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -180,7 +188,49 @@ describe('TelegramChannel', () => {
 
     const sendPromise = channel.send(buildNotification());
     await jest.advanceTimersByTimeAsync(RETRY_DELAY_MS * MAX_SEND_ATTEMPTS);
+    const result = await sendPromise;
 
-    await expect(sendPromise).resolves.toBe(false);
+    expect(result.delivered).toBe(false);
+  });
+
+  it('deletes a message via deleteMessage endpoint', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200 });
+    const channel = new TelegramChannel(
+      buildConfigService({ botToken: 'ABC123', chatId: '-999' }),
+    );
+
+    const deleted = await channel.deleteMessage(456);
+
+    expect(deleted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+
+    expect(url).toBe('https://api.telegram.org/botABC123/deleteMessage');
+    expect(init.method).toBe('POST');
+    const body = JSON.parse(init.body as string) as {
+      chat_id: string;
+      message_id: number;
+    };
+    expect(body.chat_id).toBe('-999');
+    expect(body.message_id).toBe(456);
+  });
+
+  it('returns false when deleteMessage fails', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 400 });
+    const channel = new TelegramChannel(buildConfigService());
+
+    const deleted = await channel.deleteMessage(456);
+
+    expect(deleted).toBe(false);
+  });
+
+  it('logs a warning and returns false when deleteMessage throws', async () => {
+    fetchMock.mockRejectedValue(new Error('network down'));
+    const channel = new TelegramChannel(buildConfigService());
+
+    const deleted = await channel.deleteMessage(456);
+
+    expect(deleted).toBe(false);
+    expect(Logger.prototype.warn).toHaveBeenCalled();
   });
 });

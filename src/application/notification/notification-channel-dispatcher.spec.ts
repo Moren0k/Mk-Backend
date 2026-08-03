@@ -30,7 +30,8 @@ function buildChannel(
     name: jest.fn().mockReturnValue('Telegram'),
     enabled: jest.fn().mockReturnValue(true),
     supports: jest.fn().mockReturnValue(true),
-    send: jest.fn().mockResolvedValue(true),
+    send: jest.fn().mockResolvedValue({ delivered: true, messageId: 1 }),
+    deleteMessage: jest.fn().mockResolvedValue(true),
     ...overrides,
   };
 }
@@ -101,7 +102,7 @@ describe('NotificationChannelDispatcher', () => {
   });
 
   it('publishes NotificationSentEvent when delivery succeeds', async () => {
-    const channel = buildChannel({ send: jest.fn().mockResolvedValue(true) });
+    const channel = buildChannel();
     const dispatcher = new NotificationChannelDispatcher(
       domainEventBus,
       [channel],
@@ -114,6 +115,25 @@ describe('NotificationChannelDispatcher', () => {
 
     expect(domainEventBus.publish).toHaveBeenCalledWith(
       expect.objectContaining({ eventName: NotificationSentEvent.eventName }),
+    );
+  });
+
+  it('publishes NotificationSentEvent when delivered is false', async () => {
+    const channel = buildChannel({
+      send: jest.fn().mockResolvedValue({ delivered: false }),
+    });
+    const dispatcher = new NotificationChannelDispatcher(
+      domainEventBus,
+      [channel],
+      errorTracker,
+    );
+
+    dispatcher.dispatchToAll(buildNotification);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(domainEventBus.publish).toHaveBeenCalledWith(
+      expect.objectContaining({ eventName: NotificationFailedEvent.eventName }),
     );
   });
 
@@ -138,5 +158,56 @@ describe('NotificationChannelDispatcher', () => {
       }),
     );
     expect(errorTracker.getLastError()?.message).toContain('Telegram');
+  });
+
+  it('invokes onSent callback with notification and SendResult when delivery succeeds', async () => {
+    const channel = buildChannel({
+      send: jest.fn().mockResolvedValue({ delivered: true, messageId: 42 }),
+    });
+    const dispatcher = new NotificationChannelDispatcher(
+      domainEventBus,
+      [channel],
+      errorTracker,
+    );
+    const onSent = jest.fn();
+
+    dispatcher.dispatchToAll(buildNotification, onSent);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(onSent).toHaveBeenCalledTimes(1);
+    expect(onSent).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: NotificationChannelType.TELEGRAM }),
+      { delivered: true, messageId: 42 },
+    );
+  });
+
+  it('does not invoke onSent callback when delivery fails', async () => {
+    const channel = buildChannel({
+      send: jest.fn().mockResolvedValue({ delivered: false }),
+    });
+    const dispatcher = new NotificationChannelDispatcher(
+      domainEventBus,
+      [channel],
+      errorTracker,
+    );
+    const onSent = jest.fn();
+
+    dispatcher.dispatchToAll(buildNotification, onSent);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(onSent).not.toHaveBeenCalled();
+  });
+
+  it('does not invoke onSent when it is not provided', () => {
+    const channel = buildChannel();
+    const dispatcher = new NotificationChannelDispatcher(
+      domainEventBus,
+      [channel],
+      errorTracker,
+    );
+
+    expect(() => dispatcher.dispatchToAll(buildNotification)).not.toThrow();
   });
 });

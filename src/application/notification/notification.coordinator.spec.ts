@@ -22,6 +22,7 @@ import {
 } from '../../core/notification/notification.type';
 import { OperationSnapshot } from '../../core/operation/types/operation-snapshot.type';
 import { DistributionMetric } from '../metrics/distribution.metric';
+import { MessageTracker } from './message-tracker';
 import { NotificationCoordinator } from './notification.coordinator';
 
 function buildSnapshot(
@@ -31,6 +32,7 @@ function buildSnapshot(
     operationId: 'op-1',
     strategyId: 'streak-3',
     recommendedWinner: WinnerType.BANKER,
+    streakWinner: WinnerType.PLAYER,
     currentState: OperationState.OPEN,
     currentMartingale: 0,
     maxMartingales: 2,
@@ -42,12 +44,16 @@ function buildSnapshot(
   };
 }
 
-function buildNotification(channel: NotificationChannelType): Notification {
+function buildNotification(
+  channel: NotificationChannelType,
+  operationId = 'op-1',
+): Notification {
   return createNotification({
-    title: 'title',
+    title: '',
     message: 'message',
     severity: NotificationSeverity.INFO,
     channel,
+    metadata: { operationId },
   });
 }
 
@@ -60,7 +66,8 @@ function buildChannel(
     name: jest.fn().mockReturnValue(channelType),
     enabled: jest.fn().mockReturnValue(true),
     supports: jest.fn().mockReturnValue(true),
-    send: jest.fn().mockResolvedValue(true),
+    send: jest.fn().mockResolvedValue({ delivered: true, messageId: 1 }),
+    deleteMessage: jest.fn().mockResolvedValue(true),
     ...overrides,
   };
 }
@@ -69,6 +76,9 @@ describe('NotificationCoordinator', () => {
   let domainEventBus: jest.Mocked<DomainEventBus>;
   let errorTracker: EngineErrorTracker;
   let distributionMetric: jest.Mocked<Pick<DistributionMetric, 'getSnapshot'>>;
+  let messageTracker: jest.Mocked<
+    Pick<MessageTracker, 'register' | 'getAndClear'>
+  >;
   let notificationFactory: jest.Mocked<
     Pick<
       NotificationFactory,
@@ -83,6 +93,7 @@ describe('NotificationCoordinator', () => {
 
   beforeEach(() => {
     jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
 
     domainEventBus = {
       subscribe: jest.fn(),
@@ -135,6 +146,11 @@ describe('NotificationCoordinator', () => {
         totalGames: 200,
       }),
     };
+
+    messageTracker = {
+      register: jest.fn(),
+      getAndClear: jest.fn().mockReturnValue([]),
+    };
   });
 
   afterEach(() => {
@@ -148,6 +164,7 @@ describe('NotificationCoordinator', () => {
       notificationFactory as unknown as NotificationFactory,
       errorTracker,
       distributionMetric as unknown as DistributionMetric,
+      messageTracker as unknown as MessageTracker,
     );
   }
 
@@ -282,8 +299,8 @@ describe('NotificationCoordinator', () => {
   });
 
   it('does not await channel.send(): the handler returns before the send promise resolves', () => {
-    let resolveSend!: (delivered: boolean) => void;
-    const pending = new Promise<boolean>((resolve) => {
+    let resolveSend!: (result: { delivered: boolean }) => void;
+    const pending = new Promise<{ delivered: boolean }>((resolve) => {
       resolveSend = resolve;
     });
     const channel = buildChannel(NotificationChannelType.TELEGRAM, {
@@ -291,9 +308,6 @@ describe('NotificationCoordinator', () => {
     });
     const coordinator = build([channel]);
 
-    // If handle() awaited channel.send(), this call itself would hang
-    // forever (the promise is never resolved during this test). The fact
-    // that dispatchEvent returns proves the engine is never blocked.
     expect(() =>
       dispatchEvent(
         coordinator,
@@ -303,7 +317,7 @@ describe('NotificationCoordinator', () => {
     ).not.toThrow();
     expect(channel.send).toHaveBeenCalledTimes(1);
 
-    resolveSend(true);
+    resolveSend({ delivered: true });
   });
 
   it('logs the error when a channel fails to send, without affecting other channels', async () => {
@@ -314,7 +328,6 @@ describe('NotificationCoordinator', () => {
     const coordinator = build([failing, healthy]);
 
     dispatchEvent(coordinator, OperationOpenedEvent.eventName, buildSnapshot());
-    // Let the rejected promise's .catch() handler run.
     await Promise.resolve();
     await Promise.resolve();
 
@@ -323,9 +336,7 @@ describe('NotificationCoordinator', () => {
   });
 
   it('publishes NotificationSentEvent once a channel confirms delivery', async () => {
-    const channel = buildChannel(NotificationChannelType.TELEGRAM, {
-      send: jest.fn().mockResolvedValue(true),
-    });
+    const channel = buildChannel(NotificationChannelType.TELEGRAM);
     const coordinator = build([channel]);
 
     dispatchEvent(coordinator, OperationOpenedEvent.eventName, buildSnapshot());
@@ -337,9 +348,9 @@ describe('NotificationCoordinator', () => {
     );
   });
 
-  it('publishes NotificationFailedEvent when a channel exhausts its retries (send resolves false)', async () => {
+  it('publishes NotificationFailedEvent when send resolves delivered=false', async () => {
     const channel = buildChannel(NotificationChannelType.TELEGRAM, {
-      send: jest.fn().mockResolvedValue(false),
+      send: jest.fn().mockResolvedValue({ delivered: false }),
     });
     const coordinator = build([channel]);
 
@@ -381,5 +392,71 @@ describe('NotificationCoordinator', () => {
     dispatchEvent(coordinator, OperationOpenedEvent.eventName, buildSnapshot());
 
     expect(distributionMetric.getSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it('registers intermediate messages in tracker via onSent callback', async () => {
+    const channel = buildChannel(NotificationChannelType.TELEGRAM, {
+      send: jest.fn().mockResolvedValue({ delivered: true, messageId: 42 }),
+    });
+    const coordinator = build([channel]);
+
+    dispatchEvent(
+      coordinator,
+      MartingaleOneReachedEvent.eventName,
+      buildSnapshot(),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(messageTracker.register).toHaveBeenCalledWith(
+      'op-1',
+      NotificationChannelType.TELEGRAM,
+      expect.any(String),
+      42,
+    );
+  });
+
+  it('does not register entry notifications in tracker', async () => {
+    const channel = buildChannel(NotificationChannelType.TELEGRAM);
+    const coordinator = build([channel]);
+
+    dispatchEvent(coordinator, OperationOpenedEvent.eventName, buildSnapshot());
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(messageTracker.register).not.toHaveBeenCalled();
+  });
+
+  it('schedules cleanup after WON event with delay', () => {
+    jest.useFakeTimers();
+    const channel = buildChannel(NotificationChannelType.TELEGRAM);
+    const coordinator = build([channel]);
+
+    dispatchEvent(coordinator, OperationWonEvent.eventName, buildSnapshot());
+
+    expect(messageTracker.register).not.toHaveBeenCalled();
+    expect(messageTracker.getAndClear).not.toHaveBeenCalled();
+
+    jest.advanceTimersByTime(4000);
+
+    expect(messageTracker.getAndClear).toHaveBeenCalledWith('op-1');
+
+    jest.useRealTimers();
+  });
+
+  it('clears pending cleanups on module destroy', () => {
+    jest.useFakeTimers();
+    const channel = buildChannel(NotificationChannelType.TELEGRAM);
+    const coordinator = build([channel]);
+    coordinator.onModuleInit();
+
+    dispatchEvent(coordinator, OperationWonEvent.eventName, buildSnapshot());
+
+    coordinator.onModuleDestroy();
+    jest.advanceTimersByTime(4000);
+
+    expect(messageTracker.getAndClear).not.toHaveBeenCalled();
+
+    jest.useRealTimers();
   });
 });

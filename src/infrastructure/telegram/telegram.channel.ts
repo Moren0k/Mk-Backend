@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { NotificationChannelType } from '../../core/enums/notification-channel-type.enum';
 import type { NotificationChannel } from '../../core/interfaces/notification-channel.interface';
 import { Notification } from '../../core/notification/notification.type';
+import type { SendResult } from '../../core/notification/types/send-result.type';
 import { sleep } from '../shared/sleep';
 import { escapeMarkdownV2 } from './markdown-v2';
 import { MAX_SEND_ATTEMPTS, RETRY_DELAY_MS } from './telegram-retry.constants';
@@ -37,18 +38,16 @@ export class TelegramChannel implements NotificationChannel {
   }
 
   supports(): boolean {
-    // Hoy Telegram maneja cualquier Notification. Queda como punto de
-    // extensión (por ejemplo, filtrar por severidad) sin tocar el resto.
     return true;
   }
 
-  async send(notification: Notification): Promise<boolean> {
+  async send(notification: Notification): Promise<SendResult> {
     const text = this.buildMarkdownV2Text(notification);
 
     for (let attempt = 1; attempt <= MAX_SEND_ATTEMPTS; attempt++) {
       try {
-        await this.callSendMessage(text);
-        return true;
+        const messageId = await this.callSendMessage(text);
+        return { delivered: true, messageId };
       } catch (error) {
         this.logger.error(
           `Intento ${attempt}/${MAX_SEND_ATTEMPTS} fallido al enviar a Telegram (notificationId=${notification.notificationId}).`,
@@ -64,7 +63,30 @@ export class TelegramChannel implements NotificationChannel {
     this.logger.error(
       `Se agotaron los ${MAX_SEND_ATTEMPTS} intentos; se descarta la notificación ${notification.notificationId}.`,
     );
-    return false;
+    return { delivered: false };
+  }
+
+  async deleteMessage(messageId: number): Promise<boolean> {
+    const url = `${TELEGRAM_API_BASE_URL}/bot${this.botToken}/deleteMessage`;
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: this.chatId,
+          message_id: messageId,
+        }),
+      });
+
+      return response.ok;
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo borrar el mensaje ${messageId} de Telegram.`,
+        error as Error,
+      );
+      return false;
+    }
   }
 
   private get botToken(): string | undefined {
@@ -78,10 +100,15 @@ export class TelegramChannel implements NotificationChannel {
   private buildMarkdownV2Text(notification: Notification): string {
     const title = escapeMarkdownV2(notification.title);
     const message = escapeMarkdownV2(notification.message);
+
+    if (title.length === 0) {
+      return message;
+    }
+
     return `*${title}*\n${message}`;
   }
 
-  private async callSendMessage(text: string): Promise<void> {
+  private async callSendMessage(text: string): Promise<number> {
     const url = `${TELEGRAM_API_BASE_URL}/bot${this.botToken}/sendMessage`;
     const response = await fetch(url, {
       method: 'POST',
@@ -99,5 +126,10 @@ export class TelegramChannel implements NotificationChannel {
         `Telegram respondió con estado ${response.status}: ${body}`,
       );
     }
+
+    const data = (await response.json()) as {
+      result?: { message_id?: number };
+    };
+    return data.result?.message_id ?? 0;
   }
 }

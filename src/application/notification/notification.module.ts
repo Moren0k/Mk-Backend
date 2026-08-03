@@ -7,6 +7,7 @@ import { DomainEventBusModule } from '../domain-events/domain-event-bus.module';
 import { DistributionMetricModule } from '../metrics/distribution-metric.module';
 import { ErrorTrackingModule } from '../observability/error-tracking.module';
 import { NotificationCoordinator } from './notification.coordinator';
+import { MessageTracker } from './message-tracker';
 
 /**
  * NestJS no tiene "multi providers" nativos (ver StrategyModule para el
@@ -31,6 +32,7 @@ const notificationChannelsProvider: Provider = {
     NotificationCoordinator,
     NotificationFactory,
     TelegramChannel,
+    MessageTracker,
     notificationChannelsProvider,
   ],
   exports: [NOTIFICATION_CHANNELS, NotificationFactory],

@@ -10,6 +10,7 @@ function buildSignal(overrides: Partial<StrategySignal> = {}): StrategySignal {
     strategyName: 'Streak3Strategy',
     triggeredAt: new Date('2026-08-01T00:00:00.000Z'),
     recommendedWinner: WinnerType.BANKER,
+    streakWinner: WinnerType.PLAYER,
     maxMartingales: 2,
     triggerGameUuid: 'trigger-game',
     reason: 'test',

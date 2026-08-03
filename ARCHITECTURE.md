@@ -1,6 +1,6 @@
 # Arquitectura — Motor de Análisis BacBo
 
-> Refleja el estado real del código al final de la Etapa 8 (incluye el ajuste posterior `GameReceivedEvent.isHistorical`). Fuente de verdad conceptual: `INIT.md`. Este documento describe la implementación concreta.
+> Refleja el estado real del código al cierre de la Etapa 9 (notificaciones personalizadas, distribución de porcentajes, empates visibles, streakWinner, borrado de mensajes intermedios). Fuente de verdad conceptual: `INIT.md`. Este documento describe la implementación concreta.
 
 ---
 
@@ -32,33 +32,45 @@ StrategyCoordinator                       OperationCoordinator  StatisticsServic
    Streak3Strategy.evaluate(context)
         │ (si detecta racha de 3, y la partida NO es histórica)
         ▼
-  StrategyTriggeredEvent
+   StrategyTriggeredEvent { recommendedWinner, streakWinner }
         │
         ▼
- OperationCoordinator.onStrategyTriggered()
+  OperationCoordinator.onStrategyTriggered()
         │
         ▼
    Operation.open(signal)  ──────►  OperationOpenedEvent
         │
         ▼ (con cada GameReceivedEvent siguiente)
    Operation.update(game)  ──────►  MartingaleOneReachedEvent
-                                    MartingaleTwoReachedEvent
-                                    OperationWonEvent / OperationLostEvent
+                                     MartingaleTwoReachedEvent
+                                     OperationTieOccurredEvent   ← TIE: notifica, no consume martingala
+                                     OperationWonEvent / OperationLostEvent
         │
         ▼ (todos los eventos de Operation)
- NotificationCoordinator
+  NotificationCoordinator
         │
-        ▼ NotificationFactory.createForXxx(snapshot, channelType)
-   Notification (channel-agnóstica)
+        ├── dispatch() → distributionMetric.getSnapshot() → DistributionMetricValue
+        │       │
+        │       ▼ NotificationFactory.createForXxx(snapshot, channelType, distribution)
+        │       │                                │
+        │       │                                ▼ mensajes con bolas (🔵 P / 🔴 B)
+        │       │                                   porcentajes inline (solo ENTRADA)
+        │       │                                   línea de distribución 🔵🟡🔴 al final
+        │       │
+        │       ▼ channelDispatcher.dispatchToAll(buildNotification, onSent?)
+        │           │
+        │           ├── channel.send(notification) → SendResult { delivered, messageId }
+        │           │       │
+        │           │       ├── (si MG1/MG2/TIE) onSent → MessageTracker.register(opId, type, messageId)
+        │           │       └── publish(NotificationSentEvent / NotificationFailedEvent)
+        │           │
+        │           └── (si WON/LOST) setTimeout(4s, cleanup)
+        │                   │
+        │                   ▼ MessageTracker.getAndClear(opId) → [MG1, MG2, TIE]
+        │                   │
+        │                   └── for each: channel.deleteMessage(messageId) [fire-and-forget]
         │
-        ▼ channel.send(notification)   [fire-and-forget, nunca bloquea]
-   TelegramChannel ──► Telegram Bot API
-        │
-        ▼ (según el resultado)
- NotificationSentEvent / NotificationFailedEvent
-        │
-        ▼
-   EngineMetricsService (notificationsSent / notificationsFailed)
+        ▼ Telegram Bot API
 ```
 
 `EngineHealth` no participa de este flujo: es una clase de **consulta** que lee el estado actual de `HistoryStore`, `GameEventCollector`, `OperationCoordinator` y los registros de estrategias/canales cuando alguien se lo pide.
@@ -69,11 +81,11 @@ StrategyCoordinator                       OperationCoordinator  StatisticsServic
 
 | Capa | Regla | Ejemplos |
 |---|---|---|
-| `core/` | TypeScript puro. Nunca importa `@nestjs/*`. Nunca importa de `application/` ni `infrastructure/`. | `Operation`, `Streak3Strategy`, `InMemoryHistoryStore`, `InMemoryDomainEventBus`, `Statistics`, `EngineMetrics`, `EngineErrorTracker`, todos los `DomainEvent` |
-| `application/` | Orquesta. Puede depender de `core`. Nunca de `infrastructure`. | `StrategyCoordinator`, `OperationCoordinator`, `NotificationCoordinator`, `StatisticsService`, `EngineMetricsService`, `EngineHealth` |
+| `core/` | TypeScript puro. Nunca importa `@nestjs/*`. Nunca importa de `application/` ni `infrastructure/`. | `Operation`, `Streak3Strategy`, `InMemoryHistoryStore`, `InMemoryDomainEventBus`, `Statistics`, `EngineMetrics`, `EngineErrorTracker`, todos los `DomainEvent`, `DistributionMetricValue`, `SendResult`, `MessageType` |
+| `application/` | Orquesta. Puede depender de `core`. Nunca de `infrastructure`. | `StrategyCoordinator`, `OperationCoordinator`, `NotificationCoordinator`, `StatisticsService`, `EngineMetricsService`, `EngineHealth`, `DistributionMetric`, `MessageTracker`, `NotificationChannelDispatcher` |
 | `infrastructure/` | Integraciones externas. Puede depender de `core` y `application`. | `GameEventCollector`, `TipminerSseClient`, `TipminerGameHistoryClient`, `TelegramChannel` |
 
-Verificado con `grep` al cierre de la Etapa 8: cero imports de `core/` hacia `application/`/`infrastructure/`, cero `@nestjs/*` dentro de `core/`.
+Verificado con `grep`: cero imports de `core/` hacia `application/`/`infrastructure/`, cero `@nestjs/*` dentro de `core/`.
 
 ---
 
@@ -84,26 +96,33 @@ Verificado con `grep` al cierre de la Etapa 8: cero imports de `core/` hacia `ap
 | `Game` | `type` | `core/history/game.type.ts` | Jugada ya ocurrida. `uuid`, `winner`, `score`, `playedAt`. |
 | `HistoryStore` / `InMemoryHistoryStore` | interfaz + impl | `core/interfaces/`, `core/history/` | `RingBuffer<Game>` de 200 posiciones, oculto detrás del contrato. |
 | `HistorySnapshot` | interfaz + impl | `core/interfaces/`, `core/history/` | Vista de solo lectura, congelada, que reciben las estrategias. |
-| `StrategySignal` | `type` | `core/strategy/types/` | Incluye `maxMartingales` y `triggerGameUuid` (ver §8). |
-| `Operation` | **clase rica (aggregate root)** | `core/operation/operation.entity.ts` | Encapsula la máquina de estados, martingalas, empates e historial interno. Nunca conoce `DomainEvent` ni el bus. |
-| `OperationSnapshot` | `type` | `core/operation/types/` | Payload de todos los eventos de Operation. |
+| `StrategySignal` | `type` | `core/strategy/types/` | Incluye `recommendedWinner`, `streakWinner`, `maxMartingales` y `triggerGameUuid`. `streakWinner` es el ganador de la racha (el que salió 3+ veces), `recommendedWinner` es la apuesta (el opuesto). |
+| `Operation` | **clase rica (aggregate root)** | `core/operation/operation.entity.ts` | Encapsula la máquina de estados, martingalas, empates e historial interno. Reporta `tieOccurred` sin cambiar estado. Nunca conoce `DomainEvent` ni el bus. |
+| `OperationSnapshot` | `type` | `core/operation/types/` | Payload de todos los eventos de Operation. Incluye `streakWinner`. |
+| `OperationUpdateResult` | `type` | `core/operation/types/` | Reporta `stateChanged`, `tieOccurred`, `completed`, `transition`, `snapshot`. |
 | `Notification` | `type` | `core/notification/notification.type.ts` | Channel-agnóstica: `title`, `message`, `severity`, `channel`, `metadata`. |
+| `SendResult` | `type` | `core/notification/types/send-result.type.ts` | `{ delivered: boolean; messageId?: number }` — retornado por `NotificationChannel.send()`. |
+| `MessageType` | `enum` | `core/notification/types/message-type.enum.ts` | `ENTRY, MG1, MG2, TIE, WON, LOST` — usado por `MessageTracker`. |
+| `DistributionMetricValue` | `type` | `core/metrics/types/` | `{ playerPct, tiePct, bankerPct, totalGames }` — cálculo pull-based sobre HistoryStore. |
 | `Statistics` | clase | `core/statistics/statistics.entity.ts` | Contadores incrementales O(1): totales, porcentajes, racha actual. |
 | `EngineMetrics` | clase | `core/observability/engine-metrics.entity.ts` | Contadores incrementales O(1) del motor completo. |
 | `EngineErrorTracker` | clase | `core/observability/engine-error-tracker.ts` | Único punto de registro del último error operativo. |
 
 ---
 
-## 5. Coordinadores y servicios de aplicación
+## 5. Coordinadores, servicios y dispatchers
 
 | Componente | Escucha | Publica | Nada más |
 |---|---|---|---|
-| `StrategyCoordinator` | `GameReceivedEvent` | `StrategyTriggeredEvent` | Arma el `StrategyContext`, ejecuta todas las `Strategy` registradas, nunca conoce cuáles ni cuántas. **Ignora las partidas con `isHistorical: true`** (ver §8.6): una racha ocurrida hace horas no es una oportunidad accionable. |
-| `OperationCoordinator` | `StrategyTriggeredEvent`, `GameReceivedEvent` | `OperationOpenedEvent`, `MartingaleOneReachedEvent`, `MartingaleTwoReachedEvent`, `OperationWonEvent`, `OperationLostEvent` | Crea/actualiza/elimina `Operation`. Toda la lógica de negocio vive en `Operation`, no aquí. |
-| `NotificationCoordinator` | Los 5 eventos de `Operation` | `NotificationSentEvent`, `NotificationFailedEvent` | Construye `Notification` vía `NotificationFactory` por cada canal habilitado y la envía sin bloquear el motor. |
-| `StatisticsService` | `GameReceivedEvent` | — | Delega en `Statistics` (core). Cuenta **todas** las partidas, históricas o no: es analítica descriptiva. |
-| `EngineMetricsService` | Los 9 eventos de negocio | — | Delega en `EngineMetrics` (core). |
-| `EngineHealth` | (no escucha nada) | — | Clase de consulta pura: `getSnapshot()` lee el estado actual de los demás componentes. |
+| `StrategyCoordinator` | `GameReceivedEvent` | `StrategyTriggeredEvent` | Arma el `StrategyContext`, ejecuta todas las `Strategy` registradas. **Ignora `isHistorical: true`**. |
+| `OperationCoordinator` | `StrategyTriggeredEvent`, `GameReceivedEvent` | `OperationOpenedEvent`, `MartingaleOneReachedEvent`, `MartingaleTwoReachedEvent`, `OperationTieOccurredEvent`, `OperationWonEvent`, `OperationLostEvent` | Crea/actualiza/elimina `Operation`. Publica `OperationTieOccurredEvent` cuando `result.tieOccurred`. |
+| `NotificationCoordinator` | Los 6 eventos de `Operation` | `NotificationSentEvent`, `NotificationFailedEvent` | Construye `Notification` vía `NotificationFactory`, delega envío a `NotificationChannelDispatcher`, registra messageIds en `MessageTracker` para mensajes intermedios (MG1/MG2/TIE), programa cleanup con `setTimeout(4s)` al cerrar operación. |
+| `NotificationChannelDispatcher` | (uso interno) | `NotificationSentEvent`, `NotificationFailedEvent` | Envía una `Notification` a cada canal habilitado. Acepta callback opcional `onSent` para que el coordinator registre messageIds. Compartido con `ReportNotificationCoordinator`. |
+| `DistributionMetric` | (ninguno — pull-based) | — | `@Injectable()`. Lee `HistoryStore.getAll()`, calcula distribución P/T/B. `getSnapshot()` → `DistributionMetricValue`. |
+| `MessageTracker` | (ninguno — pasivo) | — | `@Injectable()`. `Map<operationId, TrackedMessage[]>`. `register()`, `getAndClear()`. Guard `MAX_ENTRIES = 100` con evicción FIFO. |
+| `StatisticsService` | `GameReceivedEvent` | — | Delega en `Statistics` (core). Cuenta **todas** las partidas. |
+| `EngineMetricsService` | Los 10 eventos de negocio | — | Delega en `EngineMetrics` (core). |
+| `EngineHealth` | (no escucha nada) | — | Clase de consulta pura. |
 
 Todos los coordinadores con ciclo de vida (`OnModuleInit`/`OnModuleDestroy`) se suscriben/desuscriben usando la **misma referencia de handler** en ambos métodos.
 
@@ -118,12 +137,13 @@ Todos los coordinadores con ciclo de vida (`OnModuleInit`/`OnModuleDestroy`) se 
 | `OperationOpenedEvent` | `OperationSnapshot` | `OperationCoordinator` |
 | `MartingaleOneReachedEvent` | `OperationSnapshot` | `OperationCoordinator` |
 | `MartingaleTwoReachedEvent` | `OperationSnapshot` | `OperationCoordinator` |
+| `OperationTieOccurredEvent` | `OperationSnapshot` | `OperationCoordinator` |
 | `OperationWonEvent` | `OperationSnapshot` | `OperationCoordinator` |
 | `OperationLostEvent` | `OperationSnapshot` | `OperationCoordinator` |
-| `NotificationSentEvent` | `{ notificationId, channel }` | `NotificationCoordinator` |
-| `NotificationFailedEvent` | `{ notificationId, channel, reason }` | `NotificationCoordinator` |
+| `NotificationSentEvent` | `{ notificationId, channel }` | `NotificationChannelDispatcher` |
+| `NotificationFailedEvent` | `{ notificationId, channel, reason }` | `NotificationChannelDispatcher` |
 
-Preparados para una etapa futura, sin ningún publisher todavía: `OperationOpenedEvent`... (ya implementado). Reservados sin usar: ninguno — los 5 eventos de Operation previstos desde la Etapa 4 ya están completos.
+El evento `OperationTieOccurredEvent` se introdujo en la Etapa 9: un TIE nunca cambia el estado de la operación ni consume martingala, pero ahora **sí notifica** al usuario que ocurrió un empate. La entidad `Operation` reporta `tieOccurred: true` en `OperationUpdateResult`; `OperationCoordinator` publica el evento; `NotificationCoordinator` lo escucha y envía la notificación. La notificación de empate usa el mismo formato con bolas (🔵 P / 🔴 B) que las demás.
 
 ---
 
@@ -136,9 +156,13 @@ AppModule
 ├── OperationModule                  (exporta OperationCoordinator)
 │     └── DomainEventBusModule, ErrorTrackingModule
 ├── StrategyModule                   (exporta STRATEGIES)
-│     └── HistoryModule, DomainEventBusModule, ErrorTrackingModule
+│     └── HistoryModule, DomainEventBusModule, ErrorTrackingModule, OperationModule
 ├── NotificationModule               (exporta NOTIFICATION_CHANNELS)
-│     └── DomainEventBusModule, ErrorTrackingModule
+│     └── DomainEventBusModule, ErrorTrackingModule, DistributionMetricModule
+│           └── DistributionMetricModule
+│                 └── HistoryModule
+├── DistributionMetricModule         (exporta DistributionMetric)
+│     └── HistoryModule
 ├── StatisticsModule
 │     └── DomainEventBusModule
 └── ObservabilityModule              (EngineMetricsService, EngineHealth)
@@ -149,9 +173,7 @@ AppModule
                   └── HistoryModule, DomainEventBusModule, ErrorTrackingModule
 ```
 
-`ErrorTrackingModule` es un módulo hoja (sin imports propios) que provee el único `EngineErrorTracker`: al no depender de nada, puede ser importado por `CollectorModule`, `StrategyModule`, `OperationModule`, `NotificationModule` y `ObservabilityModule` sin crear un ciclo entre ellos.
-
-`CollectorModule` solo es alcanzable a través de `ObservabilityModule` (necesita `GameEventCollector` para `EngineHealth`). Esto ya **no** determina cuándo arranca el collector (ver §8).
+`ErrorTrackingModule` es un módulo hoja (sin imports propios) que provee el único `EngineErrorTracker`.
 
 ---
 
@@ -159,65 +181,156 @@ AppModule
 
 ### 8.1 `GameEventCollector.start()` explícito, no `OnModuleInit`
 
-Se verificó empíricamente en la Etapa 8 que el orden en que NestJS invoca los `onModuleInit` de distintos módulos **no es una garantía confiable**: en una prueba real, `StatisticsModule` quedó suscrito *después* de que `GameEventCollector` ya había publicado la carga inicial de 200 partidas, a pesar de que el orden de `imports` "debía" garantizar lo contrario.
-
-La solución: `GameEventCollector` ya no implementa `OnModuleInit`. Expone `start()`, y es `main.ts` quien lo invoca explícitamente **después** de `app.listen()` — momento en el que NestJS sí garantiza (esto también se verificó empíricamente) que absolutamente todos los `onModuleInit` de la aplicación ya terminaron. El resultado no depende de ningún orden de módulos.
+Se verificó empíricamente que el orden en que NestJS invoca los `onModuleInit` de distintos módulos **no es una garantía confiable**. `GameEventCollector` expone `start()`, y `main.ts` lo invoca después de `app.listen()`.
 
 ### 8.2 `triggerGameId` en `Operation`
 
-Cada `StrategySignal` incluye `triggerGameUuid` (el uuid de la partida que disparó la señal). `Operation` lo recuerda como `triggerGameId` e ignora esa partida si alguna vez le llega como actualización — sin esto, una `Operation` recién creada podría procesar como "primera jugada" la misma partida que la originó, si `OperationCoordinator` reaccionara a un `GameReceivedEvent` antes que `StrategyCoordinator` para ese mismo evento. Con este campo, el resultado es correcto sin importar el orden de los subscribers.
+Cada `StrategySignal` incluye `triggerGameUuid`. `Operation` lo recuerda como `triggerGameId` e ignora esa partida si llega como actualización. El resultado es correcto sin importar el orden de los subscribers.
 
 ### 8.3 Multi-provider manual
 
-NestJS no tiene "multi providers" nativos como Angular (dos providers bajo el mismo token se pisan, no se acumulan). `StrategyModule` y `NotificationModule` registran cada estrategia/canal como su propio provider y agrupan el arreglo con un `useFactory`. Agregar una estrategia o canal nuevo nunca toca `StrategyCoordinator` ni `NotificationCoordinator`.
+NestJS no acumula providers bajo el mismo token. `StrategyModule` y `NotificationModule` registran cada estrategia/canal y agrupan con `useFactory`. Agregar una estrategia o canal nunca toca los coordinadores.
 
 ### 8.4 Asincronía en notificaciones
 
-`DomainEventBus.publish()` es síncrono. Si `NotificationCoordinator` esperara (`await`) el envío a Telegram, el motor completo (Strategy/Operation) se congelaría mientras Telegram responde o reintenta (hasta 3 intentos). Por eso el envío es *fire-and-forget*, con su propio manejo de errores, y el resultado (entregado o no) se reporta de vuelta al motor únicamente a través de `NotificationSentEvent`/`NotificationFailedEvent`.
+`DomainEventBus.publish()` es síncrono. El envío a Telegram es *fire-and-forget*, con su propio manejo de errores. El resultado se reporta vía `NotificationSentEvent`/`NotificationFailedEvent`.
 
-### 8.5 Orden de un `DomainEventHandler` recorder
+### 8.5 `GameReceivedEvent.isHistorical`
 
-Nota para quien escriba tests contra el bus real: si un subscriber A (registrado antes que un recorder) publica de forma síncrona un evento anidado durante su propio manejo, el recorder verá ese evento anidado *antes* de terminar de recibir la notificación del evento externo, si el recorder se suscribió después que A. Para observar el verdadero orden de `publish()`, el recorder debe suscribirse **primero** a cada tipo de evento (ver `full-pipeline.e2e.spec.ts`).
+La carga inicial de hasta 200 partidas marca `isHistorical: true`. `StrategyCoordinator` las ignora. `StatisticsService` y `EngineMetricsService` sí las cuentan.
 
-### 8.6 `GameReceivedEvent.isHistorical`
+### 8.6 `DistributionMetric` pull-based
 
-Detectado tras el cierre de la Etapa 8, en un arranque real: la carga inicial de hasta 200 partidas podía disparar `Streak3Strategy` sobre rachas ocurridas horas atrás, abriendo `Operation` reales y enviando notificaciones reales a Telegram por patrones que ya no son accionables.
+`DistributionMetric.getSnapshot()` lee `HistoryStore.getAll()` bajo demanda, sin suscribirse a eventos. Esto evita depender del orden de suscripción del `DomainEventBus`. El juego ya está en `HistoryStore` antes de que cualquier subscriber se ejecute (ver §9).
 
-`GameReceivedEvent` ahora lleva `{ game, isHistorical }` en vez de solo `Game`. `GameEventCollector` marca `isHistorical: true` para la carga inicial y `false` para el SSE en vivo. `StrategyCoordinator` ignora por completo las partidas históricas (nunca las evalúa, nunca genera `StrategyTriggeredEvent`) — por lo tanto `OperationCoordinator` y `NotificationCoordinator` tampoco actúan sobre ellas, sin necesidad de que ellos mismos conozcan el flag. `StatisticsService` y `EngineMetricsService` sí cuentan el historial completo: son analítica descriptiva ("¿qué pasó?"), no una decisión de negocio.
+### 8.7 `streakWinner` en `StrategySignal`
+
+Cada señal ahora incluye tanto `recommendedWinner` (a qué apostar — el opuesto de la racha) como `streakWinner` (el ganador de la racha — el que salió 3+ veces consecutivas). Esto permite que las notificaciones muestren `"INGRESAR DESPUES DE :BANKER 40.00%"` (streakWinner) y `"APUESTA EN: PLAYER (48.50%)"` (recommendedWinner) de forma independiente.
+
+### 8.8 `tieOccurred` en `OperationUpdateResult`
+
+Un TIE nunca cambia el estado de la operación ni consume martingala. Pero ahora `Operation.update()` reporta `tieOccurred: true`, y `OperationCoordinator` publica `OperationTieOccurredEvent`. La notificación de empate informa al usuario sin modificar la máquina de estados.
+
+### 8.9 Notificaciones con bolas (🔵 P / 🔴 B)
+
+Los mensajes de Telegram usan indicadores visuales con emojis en vez de texto: `🔵 P` para PLAYER, `🔴 B` para BANKER. La línea de distribución (`🔵 xx% 🟡 xx% 🔴 xx%`) se muestra al final de todas las notificaciones.
+
+### 8.10 `NotificationChannelDispatcher` extraído
+
+La lógica de envío y reporte (`sendAndReport`) se extrajo de `NotificationCoordinator` a `NotificationChannelDispatcher`. Esto permite que `ReportNotificationCoordinator` (reportes horario/diario) reutilice exactamente la misma lógica sin duplicarla. El dispatcher acepta un callback opcional `onSent` para que el coordinator de notificaciones registre messageIds en el `MessageTracker`.
+
+### 8.11 `SendResult` y `deleteMessage` en `NotificationChannel`
+
+`NotificationChannel.send()` ahora retorna `SendResult` en vez de `boolean`. El campo `messageId` permite que `MessageTracker` registre el identificador de Telegram para borrado posterior. Se agregó `deleteMessage(messageId): Promise<boolean>` al contrato del canal — sin reintentos, fire-and-forget.
+
+### 8.12 Sistema de borrado de mensajes intermedios
+
+Cuando una operación cierra (WON/LOST), el `NotificationCoordinator`:
+1. Envía la notificación final
+2. Programa un `setTimeout(4000ms)` para dar tiempo al usuario de leer los mensajes intermedios
+3. Al disparar el timer, recupera del `MessageTracker` los messageIds de MG1, MG2 y TIE
+4. Los borra uno por uno vía `channel.deleteMessage()`
+5. ENTRY y WON/LOST nunca se registran en el tracker — nunca se borran
+
+La constante `MESSAGE_CLEANUP_DELAY_MS = 4000` está documentada como mayor que `MAX_SEND_ATTEMPTS × RETRY_DELAY_MS + margen`. `OnModuleDestroy` limpia todos los timers pendientes. El borrado fallido solo genera `logger.warn()`, nunca `NotificationFailedEvent`.
 
 ---
 
-## 9. Rendimiento (análisis, sin optimizar)
+## 9. Flujo de datos — Pull-based y race conditions
+
+### 9.1 `DistributionMetric` pull-based
+
+`GameEventCollector.storeGame()` inserta el juego en `HistoryStore` (línea 144) **antes** de publicar `GameReceivedEvent` (línea 147). Cuando cualquier subscriber del bus ejecuta su handler, el juego ya está en `HistoryStore`. `DistributionMetric.getSnapshot()` llama a `historyStore.getAll()` y ve el dato actualizado sin importar el orden de suscripción.
+
+### 9.2 `MessageTracker` y `onSent`
+
+El callback `onSent` se ejecuta dentro de `.then()` del `channel.send()`, que es un microtask. El `setTimeout(4000)` es un macrotask. Los microtasks se ejecutan antes que los macrotasks en el event loop de Node.js. Por lo tanto, cuando el cleanup dispara a los 4 segundos, todos los `onSent` de mensajes intermedios ya completaron y registraron sus messageIds. Los mensajes intermedios ocurren segundos/minutos antes del cierre, así que este timing está garantizado.
+
+---
+
+## 10. Rendimiento
 
 **O(1) hoy:**
-- `RingBuffer.add()` — array de tamaño fijo, sin `shift()`, sin recrear arrays.
-- `Statistics.recordGame()` y cada `EngineMetrics.recordXxx()` — solo incrementan contadores, nunca recorren nada.
-- `Operation.update()` — comparaciones fijas + un `push()` a su propio historial (acotado a ~3 entradas).
-- `Streak3Strategy.evaluate()` — `historySnapshot.getLast(3)`, nunca `getAll()`.
+- `RingBuffer.add()` — array de tamaño fijo, sin `shift()`.
+- `Statistics.recordGame()` y `EngineMetrics.recordXxx()` — solo incrementan contadores.
+- `Operation.update()` — comparaciones fijas + `push()` a historial acotado (~3 entradas).
+- `MessageTracker.register()` — `Map.set()` + `Array.push()`.
+- `MessageTracker.getAndClear()` — `Map.get()` + `Map.delete()`.
 
-**O(n) hoy, con `n` acotado (no crece indefinidamente):**
-- `HistoryStore.exists()`/`findByUuid()` — recorrido lineal sobre el `RingBuffer`, `n ≤ MAX_HISTORY_SIZE = 200`. Aceptable: 200 comparaciones son microsegundos, y solo se ejecuta una vez por partida entrante (~cada 35s hoy).
-- `RingBuffer.getAll()` / `HistoryStore.getAll()` — construye la copia congelada, `n ≤ 200`.
+**O(n) hoy, con `n ≤ 200`:**
+- `DistributionMetric.getSnapshot()` — itera los últimos 200 juegos una sola vez por `dispatch()`. ~450 operaciones totales, < 50μs.
+- `RingBuffer.getAll()` — copia congelada del buffer.
 
-**O(m) hoy, con `m` NO acotado por una constante fija:**
-- `OperationCoordinator.onGameReceived()` — recorre TODAS las operaciones activas por cada partida (`m` = operaciones simultáneas). Es el único costo que crece con la carga real del sistema en vez de con una constante de diseño. Cada `operation.update()` individual sigue siendo O(1), así que el costo total es O(m), no O(m²) ni peor.
-- `NotificationCoordinator.dispatch()` — O(c), `c` = canales registrados (hoy 1).
+**O(m) hoy:**
+- `OperationCoordinator.onGameReceived()` — recorre todas las operaciones activas por partida.
 
-**Qué domina el consumo de memoria:**
-- `RingBuffer<Game>`: 200 posiciones fijas — memoria constante, no crece nunca.
-- `OperationCoordinator.activeOperations` (`Map<string, Operation>`): crece con operaciones simultáneas abiertas. Es la única estructura cuyo tamaño depende directamente de cuántas señales dispara el motor de estrategias, no de un límite de diseño.
-- `Statistics`/`EngineMetrics`: memoria constante (unos pocos contadores), sin importar cuántas partidas hayan ocurrido — validado explícitamente en los tests (Etapa 8).
-
-**¿Cuántas operaciones simultáneas soportaría razonablemente esta arquitectura?**
-Cómodamente miles. Cada `Operation` es un objeto pequeño (unos pocos campos + un historial de máximo ~3 transiciones), y `operation.update()` es O(1) real. Con la cadencia actual (~1 partida cada 35s), incluso decenas de miles de operaciones activas se procesarían en microsegundos por partida — muy por debajo de cualquier presión real sobre un único proceso Node.js de un solo hilo.
-
-**¿Qué cambiaría si hubiera miles de partidas por minuto (~16-17/s)?**
-El motor en memoria (`HistoryStore`, `DomainEventBus`, los coordinadores) seguiría siendo trivial a esa tasa: cada cascada completa (historial → estrategias → operaciones → notificación) es sub-milisegundo. El cuello de botella real aparecería primero en **Telegram**: la Bot API tiene límites de tasa (~30 mensajes/segundo por bot, bastante menos por chat individual) muy por debajo de lo que el motor podría generar si muchas señales dispararan notificaciones simultáneamente — el `NotificationChannel` (no el dominio) sería la primera pieza en necesitar ajustes (una cola con límite de tasa, por ejemplo). Con volúmenes sustancialmente mayores (múltiples mesas, cientos de partidas por segundo) sí valdría la pena reconsiderar: `HistoryStore` por mesa en vez de uno global, y reemplazar el `DomainEventBus` en memoria por un broker si se necesitara escalar horizontalmente entre procesos. Nada de esto se implementó: es exactamente el tipo de optimización prematura que esta etapa pidió evitar.
+**Cleanup de mensajes**: O(N) con N ≤ 3 mensajes a borrar. Sin impacto en el motor (asíncrono, 4s después del evento).
 
 ---
 
-## 10. Cómo extender
+## 11. Formato de notificaciones
 
-- **Nueva estrategia**: crear una clase que implemente `Strategy` en `core/strategy/strategies/`, registrarla en `StrategyModule` (providers + factory). `StrategyCoordinator` no cambia.
-- **Nuevo canal de notificación**: crear una clase que implemente `NotificationChannel` en `infrastructure/`, registrarla en `NotificationModule`. `NotificationCoordinator` no cambia.
-- **Nuevo evento de Operation** (si el estado lo permitiera): agregar la clase en `core/domain-events/operation/`, sumar una entrada a `EVENT_FACTORY_BY_STATE` en `operation.coordinator.ts` y un método a `NotificationFactory`.
+Todos los mensajes comparten:
+- Título vacío (el contenido del body es auto-contenido con sus propios encabezados emoji)
+- Línea de distribución al final: `🔵 xx%  🟡 xx%  🔴 xx%`
+- Formato MarkdownV2 escapado automáticamente por `TelegramChannel`
+
+### Mensajes
+
+**🚨 ENTRADA**:
+```
+🚨 NUEVA ENTRADA 🚨
+🎯 JUEGO: Bac Bo - Evolution
+📊 PATRON: streak-3
+💣 INGRESAR DESPUES DE :🔴 B
+🔥APUESTA EN: 🔵 P
+🔁 MARTINGALAS MAXIMO: 2
+🔵 48.50%  🟡 12.00%  🔴 39.50%
+```
+
+**🔁 MG1 / MG2**:
+```
+🔁 MARTINGALA 1
+📊 PATRON: streak-3
+🔥 DOBLA TU APUESTA ANTERIOR AL: 🔵 P
+🔵 48.50%  🟡 12.00%  🔴 39.50%
+```
+
+**🟰 EMPATE**:
+```
+🟰 EMPATE 🟰
+📊 PATRON: streak-3
+🔥 APUESTA LO ANTERIOR AL: 🔵 P
+💸 ESTA GANAREMOS 💸
+🔵 48.50%  🟡 12.00%  🔴 39.50%
+```
+
+**✅ GANADA**:
+```
+✅ OPERACION GANADA ✅
+📊 PATRON: streak-3
+🏆 VICTORIA EN: PLAYER
+🔁 MARTINGALAS FINAL: 1
+💸 VAMOS POR MAS 💸
+🔵 48.50%  🟡 12.00%  🔴 39.50%
+```
+
+**❌ PERDIDA**:
+```
+❌ OPERACION PERDIDA ❌
+📊 PATRON: streak-3
+☠️ DERROTA: 🔵 P
+🔁 MARTINGALAS FINAL: 2
+🧊 MENTE FRIA, NOS RECUPERAMOS EN LA PROXIMA
+🔵 48.50%  🟡 12.00%  🔴 39.50%
+```
+
+---
+
+## 12. Cómo extender
+
+- **Nueva estrategia**: crear una clase que implemente `Strategy` en `core/strategy/strategies/`, registrarla en `StrategyModule` (providers + factory). `StrategyCoordinator` no cambia. Si la estrategia quiere exponer información adicional en `StrategySignal`, agregar el campo al tipo y usarlo en `NotificationFactory`.
+- **Nuevo canal de notificación**: crear una clase que implemente `NotificationChannel` (incluyendo `deleteMessage`) en `infrastructure/`, registrarla en `NotificationModule`. `NotificationCoordinator` no cambia.
+- **Nueva métrica**: crear una clase concreta (sin interfaz) en `application/metrics/`, inyectarla donde se necesite. Cuando existan 3+ métricas con 1+ consumidor polimórfico, extraer `Metric<T>` interface y `MetricsCoordinator`.
+- **Nuevo evento de Operation**: agregar la clase en `core/domain-events/operation/`, actualizar `OperationCoordinator` (publicar el evento), agregar suscripción en `NotificationCoordinator` y método en `NotificationFactory`.
+- **Nuevo tipo de notificación**: agregar método en `NotificationFactory` siguiendo el patrón existente (recibe `snapshot`, `channel`, `distribution?`). Usar `formatWinnerBall()` para bolas y `appendDistribution()` para la línea de porcentajes.

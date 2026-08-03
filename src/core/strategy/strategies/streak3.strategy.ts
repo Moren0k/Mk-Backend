@@ -91,6 +91,7 @@ export class Streak3Strategy implements Strategy {
       strategyName: this.name,
       triggeredAt: context.timestamp,
       recommendedWinner,
+      streakWinner: streak.winner,
       maxMartingales: MAX_MARTINGALES,
       triggerGameUuid: context.currentGame.uuid,
       reason: `Racha de ${streak.length} resultados consecutivos de ${streak.winner}.`,

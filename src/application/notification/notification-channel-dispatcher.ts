@@ -6,6 +6,7 @@ import { NotificationSentEvent } from '../../core/domain-events/notification/not
 import { NotificationChannelType } from '../../core/enums/notification-channel-type.enum';
 import type { NotificationChannel } from '../../core/interfaces/notification-channel.interface';
 import { Notification } from '../../core/notification/notification.type';
+import type { SendResult } from '../../core/notification/types/send-result.type';
 import { EngineErrorTracker } from '../../core/observability/engine-error-tracker';
 
 const RETRIES_EXHAUSTED_REASON = 'El canal agotó sus reintentos.';
@@ -35,9 +36,14 @@ export class NotificationChannelDispatcher {
    * canal habilitado que la soporte. Se le pasa una función en vez de una
    * Notification ya armada porque cada canal puede requerir una instancia
    * distinta, dirigida a su propio `NotificationChannelType`.
+   *
+   * @param onSent Callback opcional que se invoca después de que el envío
+   *   completa exitosamente, con la Notification y el SendResult del canal.
+   *   Pensado para que el coordinator registre messageIds en MessageTracker.
    */
   dispatchToAll(
     buildNotification: (channelType: NotificationChannelType) => Notification,
+    onSent?: (notification: Notification, result: SendResult) => void,
   ): void {
     for (const channel of this.channels) {
       if (!channel.enabled()) {
@@ -50,18 +56,19 @@ export class NotificationChannelDispatcher {
         continue;
       }
 
-      this.sendAndReport(channel, notification);
+      this.sendAndReport(channel, notification, onSent);
     }
   }
 
   private sendAndReport(
     channel: NotificationChannel,
     notification: Notification,
+    onSent?: (notification: Notification, result: SendResult) => void,
   ): void {
     void channel.send(notification).then(
-      (delivered) => {
+      (result) => {
         this.domainEventBus.publish(
-          delivered
+          result.delivered
             ? new NotificationSentEvent({
                 notificationId: notification.notificationId,
                 channel: notification.channel,
@@ -72,6 +79,10 @@ export class NotificationChannelDispatcher {
                 reason: RETRIES_EXHAUSTED_REASON,
               }),
         );
+
+        if (result.delivered && onSent) {
+          onSent(notification, result);
+        }
       },
       (error: unknown) => {
         const message = `El canal "${channel.name()}" falló inesperadamente al enviar la notificación ${notification.notificationId}.`;
