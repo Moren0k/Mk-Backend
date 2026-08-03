@@ -1,5 +1,6 @@
 import { NotificationChannelType } from '../enums/notification-channel-type.enum';
 import { Notification } from '../notification/notification.type';
+import type { SendResult } from '../notification/types/send-result.type';
 
 /**
  * Contrato para cualquier canal de notificación (Telegram, Discord,
@@ -18,9 +19,16 @@ export interface NotificationChannel {
    *  ejemplo, filtrando por severidad en el futuro). */
   supports(notification: Notification): boolean;
   /**
-   * @returns `true` si logró entregarla (incluso tras reintentar), `false`
-   * si agotó sus intentos. Nunca rechaza la promesa por un fallo de envío
-   * "normal" (solo por un error verdaderamente inesperado).
+   * @returns SendResult con `delivered: true` y `messageId` si logró
+   * entregarla (incluso tras reintentar), `delivered: false` si agotó sus
+   * intentos. Nunca rechaza la promesa por un fallo de envío "normal" (solo
+   * por un error verdaderamente inesperado).
    */
-  send(notification: Notification): Promise<boolean>;
+  send(notification: Notification): Promise<SendResult>;
+  /**
+   * Elimina un mensaje previamente enviado. Sin reintentos: un solo intento.
+   * Si el mensaje ya no existe o el canal rechaza la operación, retorna
+   * `false` sin lanzar excepción.
+   */
+  deleteMessage(messageId: number): Promise<boolean>;
 }

@@ -63,9 +63,7 @@ describe('NotificationFactory', () => {
       expect(notification.message).toContain(
         '\u{1F525}APUESTA EN: \u{1F535} P',
       );
-      expect(notification.message).toContain(
-        '\u{1F501} MARTINGALAS MAXIMO: 2',
-      );
+      expect(notification.message).toContain('\u{1F501} MARTINGALAS MAXIMO: 2');
     });
 
     it('shows balls even when distribution is undefined', () => {
@@ -94,9 +92,7 @@ describe('NotificationFactory', () => {
 
       expect(notification.severity).toBe(NotificationSeverity.WARNING);
       expect(notification.title).toBe('');
-      expect(notification.message).toContain(
-        'DOBLA TU APUESTA ANTERIOR AL:',
-      );
+      expect(notification.message).toContain('DOBLA TU APUESTA ANTERIOR AL:');
       expect(notification.metadata).toEqual({
         operationId: 'op-1',
         martingaleNumber: 1,
@@ -115,9 +111,7 @@ describe('NotificationFactory', () => {
         dist,
       );
 
-      expect(notification.message).toContain(
-        'DOBLA TU APUESTA ANTERIOR AL:',
-      );
+      expect(notification.message).toContain('DOBLA TU APUESTA ANTERIOR AL:');
       expect(notification.metadata).toEqual({
         operationId: 'op-1',
         martingaleNumber: 2,
