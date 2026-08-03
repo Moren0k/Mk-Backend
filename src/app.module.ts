@@ -7,6 +7,7 @@ import { OperationModule } from './application/operation/operation.module';
 import { NotificationModule } from './application/notification/notification.module';
 import { StatisticsModule } from './application/statistics/statistics.module';
 import { ObservabilityModule } from './application/observability/observability.module';
+import { ReportingModule } from './application/reporting/reporting.module';
 
 /**
  * Composition root: aquí se conectan infrastructure y application.
@@ -42,6 +43,7 @@ import { ObservabilityModule } from './application/observability/observability.m
     NotificationModule,
     StatisticsModule,
     ObservabilityModule,
+    ReportingModule,
   ],
 })
 export class AppModule {}

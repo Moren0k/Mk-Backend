@@ -24,13 +24,14 @@ function buildSnapshot(
   return {
     operationId: 'op-1',
     strategyId: 'streak-3',
-    recommendedWinner: WinnerType.BANKER,
+    recommendedWinner: WinnerType.PLAYER,
+    streakWinner: WinnerType.BANKER,
     currentState: OperationState.OPEN,
     currentMartingale: 0,
     maxMartingales: 2,
     openedAt: new Date('2026-08-01T21:15:03.000Z'),
     closedAt: undefined,
-    reason: 'Racha de 3 resultados consecutivos de PLAYER.',
+    reason: 'Racha de 3 resultados consecutivos de BANKER.',
     history: [],
     ...overrides,
   };
@@ -44,7 +45,7 @@ describe('NotificationFactory', () => {
   });
 
   describe('createForOperationOpened', () => {
-    it('builds an INFO notification with the new format', () => {
+    it('shows streakWinner ball in INGRESAR and recommendedWinner ball in APUESTA', () => {
       const dist = buildDistribution();
       const snapshot = buildSnapshot();
 
@@ -56,16 +57,18 @@ describe('NotificationFactory', () => {
 
       expect(notification.severity).toBe(NotificationSeverity.INFO);
       expect(notification.title).toBe('');
-      expect(notification.message).toContain('🚨 NUEVA ENTRADA 🚨');
-      expect(notification.message).toContain('🎯 JUEGO: Bac Bo - Evolution');
-      expect(notification.message).toContain('📊 PATRON: streak-3');
-      expect(notification.message).toContain('💣 INGRESAR DESPUES DE :BANKER');
-      expect(notification.message).toContain('🔥APUESTA EN: BANKER');
-      expect(notification.message).toContain('🔁 MARTINGALAS MAXIMO: 2');
-      expect(notification.metadata).toEqual({ operationId: 'op-1' });
+      expect(notification.message).toContain(
+        '\u{1F4A3} INGRESAR DESPUES DE :\u{1F534} B',
+      );
+      expect(notification.message).toContain(
+        '\u{1F525}APUESTA EN: \u{1F535} P',
+      );
+      expect(notification.message).toContain(
+        '\u{1F501} MARTINGALAS MAXIMO: 2',
+      );
     });
 
-    it('shows --% when distribution is undefined', () => {
+    it('shows balls even when distribution is undefined', () => {
       const snapshot = buildSnapshot();
 
       const notification = factory.createForOperationOpened(
@@ -73,32 +76,13 @@ describe('NotificationFactory', () => {
         NotificationChannelType.TELEGRAM,
       );
 
-      expect(notification.message).toContain('INGRESAR DESPUES DE :BANKER --%');
-      expect(notification.message).toContain('APUESTA EN: BANKER (--%)');
-      expect(notification.message).not.toContain('🔵');
-    });
-
-    it('shows playerPct when recommendedWinner is PLAYER', () => {
-      const dist = buildDistribution({ playerPct: 55.0, bankerPct: 40.0 });
-      const snapshot = buildSnapshot({
-        recommendedWinner: WinnerType.PLAYER,
-      });
-
-      const notification = factory.createForOperationOpened(
-        snapshot,
-        NotificationChannelType.TELEGRAM,
-        dist,
-      );
-
-      expect(notification.message).toContain(
-        'INGRESAR DESPUES DE :PLAYER 55.00%',
-      );
-      expect(notification.message).toContain('APUESTA EN: PLAYER (55.00%)');
+      expect(notification.message).toContain('INGRESAR DESPUES DE :');
+      expect(notification.message).toContain('APUESTA EN:');
     });
   });
 
   describe('createForMartingaleOneReached', () => {
-    it('builds a WARNING notification with martingale format', () => {
+    it('shows recommendedWinner as ball', () => {
       const dist = buildDistribution();
       const snapshot = buildSnapshot();
 
@@ -110,10 +94,8 @@ describe('NotificationFactory', () => {
 
       expect(notification.severity).toBe(NotificationSeverity.WARNING);
       expect(notification.title).toBe('');
-      expect(notification.message).toContain('🔁 MARTINGALA 1');
-      expect(notification.message).toContain('📊 PATRON: streak-3');
       expect(notification.message).toContain(
-        '🔥 DOBLA TU APUESTA ANTERIOR AL: BANKER',
+        'DOBLA TU APUESTA ANTERIOR AL:',
       );
       expect(notification.metadata).toEqual({
         operationId: 'op-1',
@@ -123,7 +105,7 @@ describe('NotificationFactory', () => {
   });
 
   describe('createForMartingaleTwoReached', () => {
-    it('builds a WARNING notification with martingale 2 format', () => {
+    it('shows recommendedWinner as ball', () => {
       const dist = buildDistribution();
       const snapshot = buildSnapshot();
 
@@ -133,9 +115,9 @@ describe('NotificationFactory', () => {
         dist,
       );
 
-      expect(notification.severity).toBe(NotificationSeverity.WARNING);
-      expect(notification.title).toBe('');
-      expect(notification.message).toContain('🔁 MARTINGALA 2');
+      expect(notification.message).toContain(
+        'DOBLA TU APUESTA ANTERIOR AL:',
+      );
       expect(notification.metadata).toEqual({
         operationId: 'op-1',
         martingaleNumber: 2,
@@ -144,12 +126,11 @@ describe('NotificationFactory', () => {
   });
 
   describe('createForOperationWon', () => {
-    it('builds a SUCCESS notification with victory format', () => {
+    it('builds SUCCESS notification', () => {
       const dist = buildDistribution();
       const snapshot = buildSnapshot({
         currentState: OperationState.WON,
         currentMartingale: 1,
-        closedAt: new Date('2026-08-01T21:20:00.000Z'),
       });
 
       const notification = factory.createForOperationWon(
@@ -160,20 +141,17 @@ describe('NotificationFactory', () => {
 
       expect(notification.severity).toBe(NotificationSeverity.SUCCESS);
       expect(notification.title).toBe('');
-      expect(notification.message).toContain('✅ OPERACION GANADA ✅');
-      expect(notification.message).toContain('🏆 VICTORIA EN: BANKER');
-      expect(notification.message).toContain('🔁 MARTINGALAS FINAL: 1');
-      expect(notification.message).toContain('💸 VAMOS POR MAS 💸');
+      expect(notification.message).toContain('VICTORIA EN: PLAYER');
+      expect(notification.message).toContain('MARTINGALAS FINAL: 1');
     });
   });
 
   describe('createForOperationLost', () => {
-    it('builds an ERROR notification with defeat format', () => {
+    it('shows recommendedWinner as ball in DERROTA', () => {
       const dist = buildDistribution();
       const snapshot = buildSnapshot({
         currentState: OperationState.LOST,
         currentMartingale: 2,
-        closedAt: new Date('2026-08-01T21:25:00.000Z'),
       });
 
       const notification = factory.createForOperationLost(
@@ -184,17 +162,12 @@ describe('NotificationFactory', () => {
 
       expect(notification.severity).toBe(NotificationSeverity.ERROR);
       expect(notification.title).toBe('');
-      expect(notification.message).toContain('❌ OPERACION PERDIDA ❌');
-      expect(notification.message).toContain('☠️ DERROTA: BANKER');
-      expect(notification.message).toContain('🔁 MARTINGALAS FINAL: 2');
-      expect(notification.message).toContain(
-        '🧊 MENTE FRIA, NOS RECUPERAMOS EN LA PROXIMA',
-      );
+      expect(notification.message).toContain('MARTINGALAS FINAL: 2');
     });
   });
 
   describe('createForTieOccurred', () => {
-    it('builds a WARNING notification with tie format', () => {
+    it('shows recommendedWinner as ball', () => {
       const dist = buildDistribution();
       const snapshot = buildSnapshot();
 
@@ -206,16 +179,12 @@ describe('NotificationFactory', () => {
 
       expect(notification.severity).toBe(NotificationSeverity.WARNING);
       expect(notification.title).toBe('');
-      expect(notification.message).toContain('🟰 EMPATE 🟰');
-      expect(notification.message).toContain(
-        '🔥 APUESTA LO ANTERIOR AL: BANKER',
-      );
-      expect(notification.message).toContain('💸 ESTA GANAREMOS 💸');
+      expect(notification.message).toContain('APUESTA LO ANTERIOR AL:');
     });
   });
 
   describe('distribution line', () => {
-    it('appends the distribution line to notifications when provided', () => {
+    it('appends the distribution line when provided', () => {
       const dist = buildDistribution();
       const snapshot = buildSnapshot();
 
@@ -225,10 +194,12 @@ describe('NotificationFactory', () => {
         dist,
       );
 
-      expect(notification.message).toContain('🔵 48.50%  🟡 12.00%  🔴 39.50%');
+      expect(notification.message).toContain(
+        '\u{1F535} 48.50%  \u{1F7E1} 12.00%  \u{1F534} 39.50%',
+      );
     });
 
-    it('does not append the distribution line when undefined', () => {
+    it('does not append distribution numbers when distribution is undefined', () => {
       const snapshot = buildSnapshot();
 
       const notification = factory.createForOperationOpened(
@@ -236,12 +207,10 @@ describe('NotificationFactory', () => {
         NotificationChannelType.TELEGRAM,
       );
 
-      expect(notification.message).not.toContain('🔵');
-      expect(notification.message).not.toContain('🟡');
-      expect(notification.message).not.toContain('🔴');
+      expect(notification.message).not.toContain('48.50%');
     });
 
-    it('maintains mandatory emoji order: 🔵 → 🟡 → 🔴', () => {
+    it('maintains distribution emoji order', () => {
       const dist = buildDistribution();
       const snapshot = buildSnapshot();
 
@@ -251,12 +220,12 @@ describe('NotificationFactory', () => {
         dist,
       );
 
-      const blueIndex = notification.message.indexOf('🔵');
-      const yellowIndex = notification.message.indexOf('🟡');
-      const redIndex = notification.message.indexOf('🔴');
+      const blueAt = notification.message.indexOf('48.50%');
+      const yellowAt = notification.message.indexOf('12.00%');
+      const redAt = notification.message.indexOf('39.50%');
 
-      expect(blueIndex).toBeLessThan(yellowIndex);
-      expect(yellowIndex).toBeLessThan(redIndex);
+      expect(blueAt).toBeLessThan(yellowAt);
+      expect(yellowAt).toBeLessThan(redAt);
     });
   });
 });

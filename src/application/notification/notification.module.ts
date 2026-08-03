@@ -33,6 +33,6 @@ const notificationChannelsProvider: Provider = {
     TelegramChannel,
     notificationChannelsProvider,
   ],
-  exports: [NOTIFICATION_CHANNELS],
+  exports: [NOTIFICATION_CHANNELS, NotificationFactory],
 })
 export class NotificationModule {}

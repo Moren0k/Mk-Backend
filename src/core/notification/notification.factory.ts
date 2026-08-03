@@ -3,37 +3,35 @@ import { NotificationSeverity } from '../enums/notification-severity.enum';
 import { WinnerType } from '../enums/winner-type.enum';
 import type { DistributionMetricValue } from '../metrics/types/distribution-metric-value.type';
 import { OperationSnapshot } from '../operation/types/operation-snapshot.type';
+import { formatBogotaHourLabel } from '../reporting/report-clock';
+import { ReportKind } from '../reporting/types/report-kind.enum';
+import { ReportMetricsSnapshot } from '../reporting/types/report-metrics-snapshot.type';
+import { ReportSnapshot } from '../reporting/types/report-snapshot.type';
 import { createNotification, Notification } from './notification.type';
+
+const REPORT_DIVIDER = '━━━━━━━━━━━━━━━━━━━━';
+
+const REPORT_TITLE_BY_KIND: Readonly<Record<ReportKind, string>> = {
+  [ReportKind.HOURLY]: '📊 Reporte Horario',
+  [ReportKind.DAILY]: '📅 Reporte Diario',
+};
 
 function buildPatronLine(strategyId: string): string {
   return `📊 PATRON: ${strategyId}`;
 }
 
-function formatWinnerPct(
-  distribution: DistributionMetricValue | undefined,
-  recommendedWinner: WinnerType,
-): string {
-  if (!distribution) return '--';
-  const pct =
-    recommendedWinner === WinnerType.PLAYER
-      ? distribution.playerPct
-      : distribution.bankerPct;
-  return pct.toFixed(2);
+function formatWinnerBall(winner: WinnerType): string {
+  return winner === WinnerType.PLAYER ? '🔵 P' : '🔴 B';
 }
 
-/**
- * Convierte eventos de dominio (siempre un OperationSnapshot, en esta
- * etapa) en Notification. No conoce Telegram ni ningún canal concreto: solo
- * decide título/mensaje/severidad según qué ocurrió, y a qué channelType
- * queda dirigida (lo decide quién la llama, nunca esta clase).
- */
 export class NotificationFactory {
   createForOperationOpened(
     snapshot: OperationSnapshot,
     channel: NotificationChannelType,
     distribution?: DistributionMetricValue,
   ): Notification {
-    const pct = formatWinnerPct(distribution, snapshot.recommendedWinner);
+    const streakBall = formatWinnerBall(snapshot.streakWinner);
+    const entryBall = formatWinnerBall(snapshot.recommendedWinner);
 
     return createNotification({
       channel,
@@ -46,8 +44,8 @@ export class NotificationFactory {
           '🎯 JUEGO: Bac Bo - Evolution',
           buildPatronLine(snapshot.strategyId),
           '',
-          `💣 INGRESAR DESPUES DE :${snapshot.recommendedWinner} ${pct}%`,
-          `🔥APUESTA EN: ${snapshot.recommendedWinner} (${pct}%)`,
+          `💣 INGRESAR DESPUES DE :${streakBall}`,
+          `🔥APUESTA EN: ${entryBall}`,
           '',
           `🔁 MARTINGALAS MAXIMO: ${snapshot.maxMartingales}`,
         ].join('\n'),
@@ -62,7 +60,7 @@ export class NotificationFactory {
     channel: NotificationChannelType,
     distribution?: DistributionMetricValue,
   ): Notification {
-    const pct = formatWinnerPct(distribution, snapshot.recommendedWinner);
+    const ball = formatWinnerBall(snapshot.recommendedWinner);
 
     return createNotification({
       channel,
@@ -73,7 +71,7 @@ export class NotificationFactory {
           '🔁 MARTINGALA 1',
           '',
           buildPatronLine(snapshot.strategyId),
-          `🔥 DOBLA TU APUESTA ANTERIOR AL: ${snapshot.recommendedWinner} ${pct}%`,
+          `🔥 DOBLA TU APUESTA ANTERIOR AL: ${ball}`,
         ].join('\n'),
         distribution,
       ),
@@ -86,7 +84,7 @@ export class NotificationFactory {
     channel: NotificationChannelType,
     distribution?: DistributionMetricValue,
   ): Notification {
-    const pct = formatWinnerPct(distribution, snapshot.recommendedWinner);
+    const ball = formatWinnerBall(snapshot.recommendedWinner);
 
     return createNotification({
       channel,
@@ -97,7 +95,7 @@ export class NotificationFactory {
           '🔁 MARTINGALA 2',
           '',
           buildPatronLine(snapshot.strategyId),
-          `🔥 DOBLA TU APUESTA ANTERIOR AL: ${snapshot.recommendedWinner} ${pct}%`,
+          `🔥 DOBLA TU APUESTA ANTERIOR AL: ${ball}`,
         ].join('\n'),
         distribution,
       ),
@@ -136,6 +134,8 @@ export class NotificationFactory {
     channel: NotificationChannelType,
     distribution?: DistributionMetricValue,
   ): Notification {
+    const ball = formatWinnerBall(snapshot.recommendedWinner);
+
     return createNotification({
       channel,
       severity: NotificationSeverity.ERROR,
@@ -146,7 +146,7 @@ export class NotificationFactory {
           '',
           buildPatronLine(snapshot.strategyId),
           '',
-          `☠️ DERROTA: ${snapshot.recommendedWinner}`,
+          `☠️ DERROTA: ${ball}`,
           `🔁 MARTINGALAS FINAL: ${snapshot.currentMartingale}`,
           '',
           '🧊 MENTE FRIA, NOS RECUPERAMOS EN LA PROXIMA',
@@ -157,12 +157,26 @@ export class NotificationFactory {
     });
   }
 
+  createForHourlyReport(
+    report: ReportSnapshot,
+    channel: NotificationChannelType,
+  ): Notification {
+    return this.createForReport(report, channel);
+  }
+
+  createForDailyReport(
+    report: ReportSnapshot,
+    channel: NotificationChannelType,
+  ): Notification {
+    return this.createForReport(report, channel);
+  }
+
   createForTieOccurred(
     snapshot: OperationSnapshot,
     channel: NotificationChannelType,
     distribution?: DistributionMetricValue,
   ): Notification {
-    const pct = formatWinnerPct(distribution, snapshot.recommendedWinner);
+    const ball = formatWinnerBall(snapshot.recommendedWinner);
 
     return createNotification({
       channel,
@@ -174,7 +188,7 @@ export class NotificationFactory {
           '',
           buildPatronLine(snapshot.strategyId),
           '',
-          `🔥 APUESTA LO ANTERIOR AL: ${snapshot.recommendedWinner} ${pct}%`,
+          `🔥 APUESTA LO ANTERIOR AL: ${ball}`,
           '',
           '💸 ESTA GANAREMOS 💸',
         ].join('\n'),
@@ -182,6 +196,47 @@ export class NotificationFactory {
       ),
       metadata: { operationId: snapshot.operationId },
     });
+  }
+
+  private createForReport(
+    report: ReportSnapshot,
+    channel: NotificationChannelType,
+  ): Notification {
+    const from = formatBogotaHourLabel(report.windowFrom);
+    const to = formatBogotaHourLabel(report.windowTo);
+
+    return createNotification({
+      channel,
+      severity: NotificationSeverity.INFO,
+      title: `${REPORT_TITLE_BY_KIND[report.kind]} · ${from} - ${to} (COL)`,
+      message: this.buildReportMessage(report.metrics),
+      metadata: { kind: report.kind },
+    });
+  }
+
+  private buildReportMessage(metrics: ReportMetricsSnapshot): string {
+    return [
+      REPORT_DIVIDER,
+      `🚨 Alertas enviadas: ${metrics.alertsSent}`,
+      `✅ Operaciones cerradas: ${metrics.closedOperations}`,
+      REPORT_DIVIDER,
+      `🏆 Ganadas: ${metrics.won}`,
+      `❌ Perdidas: ${metrics.lost}`,
+      `🎯 Efectividad: ${metrics.effectivenessPct.toFixed(2)}%`,
+      REPORT_DIVIDER,
+      '📈 Desglose de victorias',
+      `⚡ Directas: ${metrics.directWins}`,
+      `🥈 Martingala 1: ${metrics.martingaleOneWins}`,
+      `🥉 Martingala 2: ${metrics.martingaleTwoWins}`,
+      REPORT_DIVIDER,
+      '📊 Distribución de resultados',
+      `⚡ Directa: ${metrics.distribution.directPct.toFixed(2)}%`,
+      `🥈 MG1: ${metrics.distribution.martingaleOnePct.toFixed(2)}%`,
+      `🥉 MG2: ${metrics.distribution.martingaleTwoPct.toFixed(2)}%`,
+      `🔻 Perdidas: ${metrics.distribution.lostPct.toFixed(2)}%`,
+      REPORT_DIVIDER,
+      `⚠️ Martingalas agotadas: ${metrics.martingalesExhausted}`,
+    ].join('\n');
   }
 
   private appendDistribution(

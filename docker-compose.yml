@@ -1,0 +1,29 @@
+# Orquestación local/VPS de un solo servicio, sin dependencias externas
+# (no hay base de datos ni caché: todo el estado vive en memoria del
+# proceso). Útil para levantar la app igual en tu máquina o en un VPS con
+# un solo comando: `docker compose up -d --build`.
+#
+# No es la única forma de desplegar: cualquier plataforma que construya a
+# partir de un Dockerfile (Render, Coolify, Dokploy, Easypanel, Fly.io,
+# DigitalOcean, etc.) sirve igual sin este archivo. Ver README.md.
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - '${PORT:-3000}:${PORT:-3000}'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'wget',
+          '-qO-',
+          'http://127.0.0.1:${PORT:-3000}/healthz',
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3

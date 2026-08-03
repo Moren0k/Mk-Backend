@@ -20,6 +20,19 @@ async function bootstrap(): Promise<void> {
   const configService = app.get(ConfigService);
   const port = configService.get<number>('app.port', 3000);
 
+  // Shutdown hooks: en SIGTERM/SIGINT (p. ej. un redeploy o un `docker stop`,
+  // sin importar el orquestador) NestJS ejecuta los OnModuleDestroy y
+  // GameEventCollector cierra el SSE limpio.
+  app.enableShutdownHooks();
+
+  // Health check sin estado: útil para health-checks de plataforma y
+  // monitoreo externo. No toca la lógica del motor.
+  const health = app.get(EngineHealth);
+  app.getHttpAdapter().get('/healthz', () => ({
+    status: 'ok',
+    ...health.getSnapshot(),
+  }));
+
   // `app.listen()` garantiza que TODOS los `onModuleInit` de la aplicación
   // ya corrieron (Strategy, Operation, Notification, Statistics,
   // EngineMetrics ya están suscritos al DomainEventBus). Solo después de
@@ -45,4 +58,35 @@ function logStartupSnapshot(app: NestFastifyApplication): void {
   );
 }
 
-void bootstrap();
+bootstrap().catch((error: unknown) => handleBootstrapError(error));
+
+/**
+ * Sin esto, un puerto ocupado (el caso más común en desarrollo: un proceso
+ * anterior que no llegó a cerrarse) se ve como un stack trace crudo de
+ * Node. Un mensaje explícito ahorra el "¿por qué no arranca?" tanto en
+ * local como leyendo logs de cualquier plataforma de despliegue.
+ */
+function handleBootstrapError(error: unknown): void {
+  const logger = new Logger('Bootstrap');
+
+  if (isAddressInUseError(error)) {
+    logger.error(
+      `El puerto ya está en uso. Verifica que no haya otra instancia de la ` +
+        `aplicación corriendo (por ejemplo, un proceso anterior que no se ` +
+        `cerró del todo) o define PORT con un valor libre.`,
+    );
+  } else {
+    logger.error('Error fatal al iniciar la aplicación.', error as Error);
+  }
+
+  process.exit(1);
+}
+
+function isAddressInUseError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'EADDRINUSE'
+  );
+}
