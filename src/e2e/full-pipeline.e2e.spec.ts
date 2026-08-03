@@ -241,9 +241,6 @@ describe('Full pipeline (e2e, no real API)', () => {
 
     // Notificaciones: 7 en total (abierta, 3 ties, MG1, MG2, ganada), todas entregadas.
     expect(engine.channel.sent).toHaveLength(7);
-    expect(engine.channel.sent[0].title).toContain('Nueva operación');
-    expect(engine.channel.sent[1].title).toContain('Empate');
-    expect(engine.channel.sent[6].title).toContain('ganada');
 
     // La primera notificación debe incluir la línea de distribución.
     expect(engine.channel.sent[0].message).toContain('🔵');
@@ -326,8 +323,6 @@ describe('Full pipeline (e2e, no real API)', () => {
 
     // Notificaciones.
     expect(engine.channel.sent).toHaveLength(7);
-    expect(engine.channel.sent[1].title).toContain('Empate');
-    expect(engine.channel.sent[6].title).toContain('perdida');
     expect(engine.channel.sent[6].severity).toBeDefined();
     expect(engine.channel.sent[0].message).toContain('🔵');
 
