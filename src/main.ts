@@ -20,9 +20,8 @@ async function bootstrap(): Promise<void> {
   const configService = app.get(ConfigService);
   const port = configService.get<number>('app.port', 3000);
 
-  // Shutdown hooks: en SIGTERM/SIGINT (p. ej. un redeploy o un `docker stop`,
-  // sin importar el orquestador) NestJS ejecuta los OnModuleDestroy y
-  // GameEventCollector cierra el SSE limpio.
+  // Shutdown hooks: ante SIGTERM/SIGINT (p. ej. Ctrl+C) NestJS ejecuta los
+  // OnModuleDestroy y GameEventCollector cierra el SSE limpio.
   app.enableShutdownHooks();
 
   // Health check sin estado: útil para health-checks de plataforma y

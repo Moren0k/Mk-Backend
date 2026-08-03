@@ -33,7 +33,7 @@ pnpm test:e2e           # jest con test/jest-e2e.json
 
 Ejecutar un solo test: `pnpm test -- ring-buffer.spec` o `pnpm test -- --testPathPattern=streak3`.
 
-Docker (build multi-stage, imagen final sin devDependencies): `docker build -t bacbo-analysis-engine .` / `docker compose up -d --build`. La app es agnóstica al proveedor de infraestructura — ver la sección "Despliegue en cualquier proveedor" de `README.md`. `railway.json` en la raíz es un ejemplo opcional (solo lo lee Railway), no la forma principal de correr el proyecto.
+Por ahora el proyecto corre únicamente en local (`pnpm start:dev`/`pnpm start:prod`); no hay Docker, Railway ni Render configurados en el repo — se retiraron deliberadamente hasta que haya un VPS disponible.
 
 La suite unitaria vive junto al código como `*.spec.ts` (rootDir `src`, ver `jest` en `package.json`). El test end-to-end real del pipeline completo es `src/e2e/full-pipeline.e2e.spec.ts`: corre el sistema real (Strategy, Operation, Notification, Statistics, EngineMetrics) sobre un `DomainEventBus` real, sin la API de Tipminer; solo dobla el `NotificationChannel` para no tocar Telegram.
 
