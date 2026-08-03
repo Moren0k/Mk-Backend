@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import { EngineMetricsService } from '../application/observability/engine-metrics.service';
 import { StatisticsService } from '../application/statistics/statistics.service';
 import { DistributionMetric } from '../application/metrics/distribution.metric';
+import { MessageTracker } from '../application/notification/message-tracker';
 import { NotificationCoordinator } from '../application/notification/notification.coordinator';
 import { ActiveOperationRegistry } from '../application/operation/active-operation-registry';
 import { OperationCoordinator } from '../application/operation/operation.coordinator';
@@ -29,6 +30,7 @@ import { InMemoryHistoryStore } from '../core/history/in-memory-history-store';
 import { NotificationChannel } from '../core/interfaces/notification-channel.interface';
 import { NotificationFactory } from '../core/notification/notification.factory';
 import { Notification } from '../core/notification/notification.type';
+import type { SendResult } from '../core/notification/types/send-result.type';
 import { EngineErrorTracker } from '../core/observability/engine-error-tracker';
 import { Streak3Strategy } from '../core/strategy/strategies/streak3.strategy';
 
@@ -53,6 +55,7 @@ function buildGame(uuid: string, winner: WinnerType): Game {
 
 class FakeNotificationChannel implements NotificationChannel {
   readonly sent: Notification[] = [];
+  readonly deleted: number[] = [];
 
   getChannelType(): NotificationChannelType {
     return NotificationChannelType.TELEGRAM;
@@ -70,8 +73,16 @@ class FakeNotificationChannel implements NotificationChannel {
     return true;
   }
 
-  send(notification: Notification): Promise<boolean> {
+  send(notification: Notification): Promise<SendResult> {
     this.sent.push(notification);
+    return Promise.resolve({
+      delivered: true,
+      messageId: this.sent.length,
+    });
+  }
+
+  deleteMessage(messageId: number): Promise<boolean> {
+    this.deleted.push(messageId);
     return Promise.resolve(true);
   }
 }
@@ -108,12 +119,14 @@ function buildEngine(): Engine {
   );
   const channel = new FakeNotificationChannel();
   const distributionMetric = new DistributionMetric(historyStore);
+  const messageTracker = new MessageTracker();
   const notificationCoordinator = new NotificationCoordinator(
     domainEventBus,
     [channel],
     new NotificationFactory(),
     errorTracker,
     distributionMetric,
+    messageTracker,
   );
   const statisticsService = new StatisticsService(domainEventBus);
   const engineMetricsService = new EngineMetricsService(domainEventBus);
