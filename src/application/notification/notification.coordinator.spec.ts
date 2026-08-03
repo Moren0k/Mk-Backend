@@ -459,4 +459,59 @@ describe('NotificationCoordinator', () => {
 
     jest.useRealTimers();
   });
+
+  it('does not register in tracker when SendResult has nullish messageId', async () => {
+    const channel = buildChannel(NotificationChannelType.TELEGRAM, {
+      send: jest.fn().mockResolvedValue({ delivered: true }),
+    });
+    const coordinator = build([channel]);
+
+    dispatchEvent(
+      coordinator,
+      MartingaleOneReachedEvent.eventName,
+      buildSnapshot(),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(messageTracker.register).not.toHaveBeenCalled();
+  });
+
+  it('does not register in tracker when metadata has no string operationId', async () => {
+    const factoryWithoutOpId = {
+      createForMartingaleOneReached: jest
+        .fn()
+        .mockImplementation((_: unknown, channel: NotificationChannelType) =>
+          createNotification({
+            title: '',
+            message: '',
+            severity: NotificationSeverity.WARNING,
+            channel,
+            metadata: {},
+          }),
+        ),
+    };
+    const channel = buildChannel(NotificationChannelType.TELEGRAM, {
+      send: jest.fn().mockResolvedValue({ delivered: true, messageId: 42 }),
+    });
+    const coordinator = new NotificationCoordinator(
+      domainEventBus,
+      [channel],
+      factoryWithoutOpId as unknown as NotificationFactory,
+      errorTracker,
+      distributionMetric as unknown as DistributionMetric,
+      messageTracker as unknown as MessageTracker,
+    );
+
+    coordinator.onModuleInit();
+    dispatchEvent(
+      coordinator,
+      MartingaleOneReachedEvent.eventName,
+      buildSnapshot(),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(messageTracker.register).not.toHaveBeenCalled();
+  });
 });

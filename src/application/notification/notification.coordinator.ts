@@ -213,12 +213,18 @@ export class NotificationCoordinator implements OnModuleInit, OnModuleDestroy {
       (channelType) => buildNotification(snapshot, channelType, distribution),
       messageType
         ? (notification, result) => {
-            const operationId = notification.metadata.operationId as string;
+            if (result.messageId == null) {
+              return;
+            }
+            const rawId = notification.metadata.operationId;
+            if (typeof rawId !== 'string') {
+              return;
+            }
             this.messageTracker.register(
-              operationId,
+              rawId,
               notification.channel,
               messageType,
-              result.messageId!,
+              result.messageId,
             );
           }
         : undefined,
