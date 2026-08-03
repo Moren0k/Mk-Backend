@@ -66,7 +66,10 @@ export function calculateReportMetrics(
   });
 }
 
-function rate(count: number, total: number): number {
+/** Exportada para que otros cálculos de reportes (p. ej. el resumen
+ *  completo bajo demanda) redondeen porcentajes exactamente igual, sin
+ *  duplicar esta lógica. */
+export function rate(count: number, total: number): number {
   if (total === 0) {
     return 0;
   }

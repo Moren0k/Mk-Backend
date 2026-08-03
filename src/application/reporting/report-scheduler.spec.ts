@@ -1,5 +1,4 @@
 import { DomainEventBus } from '../../core/domain-events/base/domain-event-bus.interface';
-import { DailyReportGeneratedEvent } from '../../core/domain-events/reporting/daily-report-generated.event';
 import { HourlyReportGeneratedEvent } from '../../core/domain-events/reporting/hourly-report-generated.event';
 import { OperationState } from '../../core/enums/operation-state.enum';
 import type { OperationReportStore } from '../../core/reporting/interfaces/operation-report-store.interface';
@@ -25,7 +24,8 @@ describe('ReportScheduler', () => {
       recordClosed: jest.fn(),
       getOpenedBetween: jest.fn().mockReturnValue([]),
       getClosedBetween: jest.fn().mockReturnValue([]),
-      clear: jest.fn(),
+      getAllOpened: jest.fn().mockReturnValue([]),
+      getAllClosed: jest.fn().mockReturnValue([]),
     };
   });
 
@@ -71,28 +71,6 @@ describe('ReportScheduler', () => {
     jest.advanceTimersByTime(30 * 60 * 1000);
 
     expect(domainEventBus.publish).not.toHaveBeenCalled();
-  });
-
-  it('publishes the daily report at 22:00 Bogotá and clears the store afterwards', () => {
-    // now = 21:00 Bogotá del 31/07 (02:00Z del 01/08) -> próximo 22:00 Bogotá 1h después.
-    // El bloque horario 21:00-22:00 Bogotá también es operativo, así que el
-    // reporte horario y el diario coinciden en este mismo tick: ambos deben
-    // dispararse ("además del reporte horario", según lo pedido).
-    start('2026-08-01T02:00:00.000Z');
-
-    jest.advanceTimersByTime(60 * 60 * 1000);
-
-    expect(publishedEvents()).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          eventName: HourlyReportGeneratedEvent.eventName,
-        }),
-        expect.objectContaining({
-          eventName: DailyReportGeneratedEvent.eventName,
-        }),
-      ]),
-    );
-    expect(store.clear).toHaveBeenCalledTimes(1);
   });
 
   it('builds the report window (Bogotá 10:00-11:00) and its metrics from the store', () => {

@@ -39,6 +39,7 @@ pnpm start:dev
 | Variable | Descripción |
 |---|---|
 | `PORT` | Puerto HTTP del servidor (Fastify). Default `3000`. |
+| `ADMIN_PASSWORD` | Contraseña del endpoint `POST /admin/commands`. Se hashea al arrancar; vacía = endpoint deshabilitado. |
 | `TELEGRAM_BOT_TOKEN` | Token del bot de Telegram (se obtiene con `@BotFather`). |
 | `TELEGRAM_CHAT_ID` | Id del chat/grupo donde el bot envía las alertas. |
 | `TIPMINER_BASE_URL` | Base de la API pública de Tipminer. Trae un valor por defecto. |

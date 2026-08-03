@@ -10,7 +10,4 @@ export const BOGOTA_UTC_OFFSET_HOURS = -5;
 /** Hora de Bogotá en la que el bot empieza a operar (10:00 AM). */
 export const OPERATING_START_HOUR = 10;
 
-/** Hora de Bogotá en la que se envía el reporte diario (10:00 PM). */
-export const DAILY_REPORT_HOUR = 22;
-
 export const ONE_HOUR_MS = 60 * 60 * 1000;

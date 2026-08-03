@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { AppConfigModule } from './infrastructure/config/app-config.module';
+import { AdminModule } from './application/admin/admin.module';
 import { HistoryModule } from './application/history/history.module';
 import { StrategyModule } from './application/strategy/strategy.module';
 import { OperationModule } from './application/operation/operation.module';
@@ -44,6 +45,7 @@ import { ReportingModule } from './application/reporting/reporting.module';
     StatisticsModule,
     ObservabilityModule,
     ReportingModule,
+    AdminModule,
   ],
 })
 export class AppModule {}

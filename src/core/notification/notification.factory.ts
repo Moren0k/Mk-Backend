@@ -2,18 +2,14 @@ import { NotificationChannelType } from '../enums/notification-channel-type.enum
 import { NotificationSeverity } from '../enums/notification-severity.enum';
 import type { DistributionMetricValue } from '../metrics/types/distribution-metric-value.type';
 import { OperationSnapshot } from '../operation/types/operation-snapshot.type';
+import { formatDurationLabel } from '../reporting/duration-formatter';
 import { formatBogotaHourLabel } from '../reporting/report-clock';
-import { ReportKind } from '../reporting/types/report-kind.enum';
 import { ReportMetricsSnapshot } from '../reporting/types/report-metrics-snapshot.type';
 import { ReportSnapshot } from '../reporting/types/report-snapshot.type';
+import { SummaryMetricsSnapshot } from '../reporting/types/summary-metrics-snapshot.type';
 import { createNotification, Notification } from './notification.type';
 
 const REPORT_DIVIDER = '━━━━━━━━━━━━━━━━━━━━';
-
-const REPORT_TITLE_BY_KIND: Readonly<Record<ReportKind, string>> = {
-  [ReportKind.HOURLY]: '📊 Reporte Horario',
-  [ReportKind.DAILY]: '📅 Reporte Diario',
-};
 
 function humanizeStrategyId(strategyId: string): string {
   return strategyId
@@ -130,14 +126,38 @@ export class NotificationFactory {
     report: ReportSnapshot,
     channel: NotificationChannelType,
   ): Notification {
-    return this.createForReport(report, channel);
+    const from = formatBogotaHourLabel(report.windowFrom);
+    const to = formatBogotaHourLabel(report.windowTo);
+
+    return createNotification({
+      channel,
+      severity: NotificationSeverity.INFO,
+      title: `📊 Reporte Horario · ${from} - ${to} (COL)`,
+      message: this.buildReportMessage(report.metrics),
+      metadata: {},
+    });
   }
 
-  createForDailyReport(
-    report: ReportSnapshot,
+  /**
+   * Resumen completo bajo demanda (endpoint admin, comando RESUMEN): todo
+   * el historial en memoria desde que arrancó el proceso, sin ventana de
+   * tiempo. Mismo estilo que el reporte horario (REPORT_DIVIDER, emojis
+   * consistentes) pero agrupado en más secciones porque el detalle
+   * adicional (rachas, martingalas, destacados por hora) sí aporta valor
+   * cuando se pide explícitamente, a diferencia del vistazo horario.
+   */
+  createForSummaryReport(
+    metrics: SummaryMetricsSnapshot,
+    generatedAt: Date,
     channel: NotificationChannelType,
   ): Notification {
-    return this.createForReport(report, channel);
+    return createNotification({
+      channel,
+      severity: NotificationSeverity.INFO,
+      title: `🧭 Resumen Completo del Sistema · ${formatTime(generatedAt)}`,
+      message: this.buildSummaryMessage(metrics),
+      metadata: {},
+    });
   }
 
   createForTieOccurred(
@@ -163,32 +183,41 @@ export class NotificationFactory {
   }
 
   /**
-   * Un único builder para reportes horarios y diarios: usan exactamente el
-   * mismo cuerpo de métricas (según lo pedido), solo cambia el título por
-   * `ReportKind`.
+   * Resumen breve pensado para leerse de un vistazo: solo alertas, el
+   * resultado global y la distribución (conteo + %) por tipo de cierre. No
+   * incluye operaciones cerradas ni martingalas agotadas por separado —
+   * esa profundidad queda para el resumen completo bajo demanda
+   * (ver createForSummaryReport).
    */
-  private createForReport(
-    report: ReportSnapshot,
-    channel: NotificationChannelType,
-  ): Notification {
-    const from = formatBogotaHourLabel(report.windowFrom);
-    const to = formatBogotaHourLabel(report.windowTo);
-
-    return createNotification({
-      channel,
-      severity: NotificationSeverity.INFO,
-      title: `${REPORT_TITLE_BY_KIND[report.kind]} · ${from} - ${to} (COL)`,
-      message: this.buildReportMessage(report.metrics),
-      metadata: { kind: report.kind },
-    });
-  }
-
   private buildReportMessage(metrics: ReportMetricsSnapshot): string {
     return [
       REPORT_DIVIDER,
       `🚨 Alertas enviadas: ${metrics.alertsSent}`,
-      `✅ Operaciones cerradas: ${metrics.closedOperations}`,
       REPORT_DIVIDER,
+      `🏆 Ganadas: ${metrics.won}`,
+      `❌ Perdidas: ${metrics.lost}`,
+      `🎯 Efectividad: ${metrics.effectivenessPct.toFixed(2)}%`,
+      REPORT_DIVIDER,
+      '📈 Distribución de resultados',
+      '',
+      `⚡ Directas: ${metrics.directWins} - ${metrics.distribution.directPct.toFixed(2)}%`,
+      `🥈 Martingala 1: ${metrics.martingaleOneWins} - ${metrics.distribution.martingaleOnePct.toFixed(2)}%`,
+      `🥉 Martingala 2: ${metrics.martingaleTwoWins} - ${metrics.distribution.martingaleTwoPct.toFixed(2)}%`,
+      `🔻 Perdidas: ${metrics.distribution.lostPct.toFixed(2)}%`,
+    ].join('\n');
+  }
+
+  private buildSummaryMessage(metrics: SummaryMetricsSnapshot): string {
+    const currentStreakLabel =
+      metrics.currentStreak.result === 'NONE'
+        ? 'Sin datos'
+        : `${metrics.currentStreak.length} ${metrics.currentStreak.result === 'WON' ? 'ganadas' : 'perdidas'}`;
+
+    return [
+      '🎛️ Información general',
+      `🕐 Tiempo activo: ${formatDurationLabel(metrics.uptimeMs)}`,
+      `🚨 Alertas enviadas: ${metrics.alertsSent}`,
+      `✅ Operaciones cerradas: ${metrics.closedOperations}`,
       `🏆 Ganadas: ${metrics.won}`,
       `❌ Perdidas: ${metrics.lost}`,
       `🎯 Efectividad: ${metrics.effectivenessPct.toFixed(2)}%`,
@@ -197,15 +226,57 @@ export class NotificationFactory {
       `⚡ Directas: ${metrics.directWins}`,
       `🥈 Martingala 1: ${metrics.martingaleOneWins}`,
       `🥉 Martingala 2: ${metrics.martingaleTwoWins}`,
+      `⛔ Martingalas agotadas: ${metrics.martingalesExhausted}`,
       REPORT_DIVIDER,
-      '📊 Distribución de resultados',
+      '📊 Distribución porcentual',
       `⚡ Directa: ${metrics.distribution.directPct.toFixed(2)}%`,
       `🥈 MG1: ${metrics.distribution.martingaleOnePct.toFixed(2)}%`,
       `🥉 MG2: ${metrics.distribution.martingaleTwoPct.toFixed(2)}%`,
       `🔻 Perdidas: ${metrics.distribution.lostPct.toFixed(2)}%`,
       REPORT_DIVIDER,
-      `⚠️ Martingalas agotadas: ${metrics.martingalesExhausted}`,
+      '🔍 Métricas adicionales',
+      `🔥 Mejor racha de victorias: ${metrics.bestWinStreak}`,
+      `🧊 Peor racha de derrotas: ${metrics.worstLossStreak}`,
+      `📌 Racha actual: ${currentStreakLabel}`,
+      `⚖️ Ratio Ganadas/Perdidas: ${this.formatRatio(metrics.winLossRatio)}`,
+      `🎲 Martingalas usadas (total): ${metrics.totalMartingalesUsed}`,
+      `🎯 Promedio MG por victoria: ${metrics.avgMartingalesPerWin.toFixed(2)}`,
+      `📎 % victorias directas: ${metrics.directWinPctOfWins.toFixed(2)}%`,
+      `📎 % victorias con MG1: ${metrics.martingaleOneWinPctOfWins.toFixed(2)}%`,
+      `📎 % victorias con MG2: ${metrics.martingaleTwoWinPctOfWins.toFixed(2)}%`,
+      `📬 Promedio alertas/hora: ${metrics.alertsPerHourAvg.toFixed(2)}`,
+      `📈 Efectividad promedio/hora: ${metrics.avgEffectivenessPerHour.toFixed(2)}%`,
+      ...this.buildHourHighlightLines(metrics),
     ].join('\n');
+  }
+
+  private buildHourHighlightLines(metrics: SummaryMetricsSnapshot): string[] {
+    const lines: string[] = [];
+
+    if (metrics.bestAlertsHour) {
+      lines.push(
+        `⏰ Hora con más alertas: ${metrics.bestAlertsHour.label} (${metrics.bestAlertsHour.value})`,
+      );
+    }
+    if (metrics.bestEffectivenessHour) {
+      lines.push(
+        `🌟 Mejor hora (efectividad): ${metrics.bestEffectivenessHour.label} (${metrics.bestEffectivenessHour.value.toFixed(2)}%)`,
+      );
+    }
+    if (metrics.worstEffectivenessHour) {
+      lines.push(
+        `⚠️ Peor hora (efectividad): ${metrics.worstEffectivenessHour.label} (${metrics.worstEffectivenessHour.value.toFixed(2)}%)`,
+      );
+    }
+
+    return lines;
+  }
+
+  private formatRatio(ratio: number): string {
+    if (!Number.isFinite(ratio)) {
+      return '∞';
+    }
+    return ratio.toFixed(2);
   }
 
   private createForMartingaleReached(

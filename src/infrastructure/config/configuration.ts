@@ -8,6 +8,11 @@ export default () => ({
   app: {
     port: parseInt(process.env.PORT ?? '3000', 10),
   },
+  admin: {
+    // Sin default: si no está definida, el endpoint admin falla cerrado
+    // (siempre Unauthorized) en vez de aceptar una contraseña predecible.
+    password: process.env.ADMIN_PASSWORD,
+  },
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN,
     chatId: process.env.TELEGRAM_CHAT_ID,

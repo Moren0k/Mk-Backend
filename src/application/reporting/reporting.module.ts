@@ -8,6 +8,7 @@ import { NotificationModule } from '../notification/notification.module';
 import { OperationReportRecorder } from './operation-report-recorder';
 import { ReportNotificationCoordinator } from './report-notification.coordinator';
 import { ReportScheduler } from './report-scheduler';
+import { SummaryReportService } from './summary-report.service';
 
 /**
  * Capacidad de métricas/reportes, completamente independiente del motor de
@@ -15,6 +16,10 @@ import { ReportScheduler } from './report-scheduler';
  * (Strategy/Operation/Notification/Statistics) sigue funcionando exacto
  * igual. OPERATION_REPORT_STORE hoy apunta a InMemoryOperationReportStore;
  * el día que exista base de datos, esta es la única línea que cambia.
+ *
+ * Exporta SummaryReportService para que AdminModule pueda invocarlo bajo
+ * demanda (comando RESUMEN) sin que este módulo conozca HTTP ni el
+ * endpoint admin.
  */
 @Module({
   imports: [DomainEventBusModule, ErrorTrackingModule, NotificationModule],
@@ -23,6 +28,8 @@ import { ReportScheduler } from './report-scheduler';
     OperationReportRecorder,
     ReportScheduler,
     ReportNotificationCoordinator,
+    SummaryReportService,
   ],
+  exports: [SummaryReportService],
 })
 export class ReportingModule {}
