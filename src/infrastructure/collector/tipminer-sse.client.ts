@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { EventSource, EventSourceInit, FetchLike } from 'eventsource';
 
 import { SseClient, SseConnectionHandlers } from './sse-client.interface';
+import { TIPMINER_BROWSER_HEADERS } from './tipminer-browser-headers';
 import { buildTipminerLiveUrl, TipminerConfig } from './tipminer-endpoints';
 
 /**
@@ -58,22 +59,26 @@ export class TipminerSseClient implements SseClient {
   }
 
   /**
-   * La API hoy es pública (ver API.MD). Si en el futuro requiere
-   * autenticación, basta con definir TIPMINER_API_KEY: este fetch
-   * personalizado ya queda preparado para adjuntarla.
+   * Siempre inyecta headers de navegador real (ver tipminer-browser-headers.ts):
+   * sin ellos, el SSE se identifica como un script genérico, lo que varios
+   * WAF bloquean sin importar la IP de origen. Si además hay
+   * TIPMINER_API_KEY definida (para cuando la API deje de ser pública, ver
+   * API.MD), se suma el Authorization.
    */
-  private buildInit(): EventSourceInit | undefined {
+  private buildInit(): EventSourceInit {
     const apiKey = this.configService.get<string>('tipminer.apiKey');
-    if (!apiKey) {
-      return undefined;
-    }
 
-    const authorizedFetch: FetchLike = (url, init) =>
+    const customFetch: FetchLike = (url, init) =>
       globalThis.fetch(url, {
         ...init,
-        headers: { ...init.headers, Authorization: `Bearer ${apiKey}` },
+        headers: {
+          ...init.headers,
+          ...TIPMINER_BROWSER_HEADERS,
+          Accept: 'text/event-stream',
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        },
       });
 
-    return { fetch: authorizedFetch };
+    return { fetch: customFetch };
   }
 }

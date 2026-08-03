@@ -29,9 +29,9 @@ Para el detalle completo de la arquitectura (capas, decisiones de diseño, anál
 
 - Node.js >=22 (usado en desarrollo: v24; ver `engines` en `package.json`)
 - pnpm
-- Docker (opcional)
 
-La aplicación es agnóstica a dónde corre: no asume ningún proveedor de infraestructura.
+Por ahora el motor corre en local (en tu máquina). Cuando haya un VPS
+disponible se documenta acá mismo cómo desplegarlo.
 
 ## Ejecución local
 
@@ -62,39 +62,6 @@ pnpm start:dev
 | `pnpm start:prod` | Corre el build compilado (`node dist/main.js`). |
 | `pnpm test` | Corre la suite de tests (Jest). |
 | `pnpm lint` | ESLint + Prettier. |
-
-## Ejecución con Docker
-
-```bash
-docker build -t bacbo-analysis-engine .
-docker run --rm -p 3000:3000 --env-file .env bacbo-analysis-engine
-```
-
-O con Docker Compose:
-
-```bash
-docker compose up -d --build
-```
-
-La imagen expone un healthcheck contra `GET /healthz`.
-
-## Despliegue en cualquier proveedor
-
-La aplicación no asume ningún proveedor específico. Cualquier plataforma que sepa construir y correr un `Dockerfile` (o un proceso Node.js) funciona sin cambios en el código:
-
-- **Build**: `docker build .` (o sin Docker: `pnpm install --frozen-lockfile && pnpm build`).
-- **Start**: `node dist/main.js`, o `pnpm start:prod`.
-- **Puerto**: la app escucha en `0.0.0.0` y en el puerto de `PORT` (default `3000`).
-- **Health check**: `GET /healthz` responde `200`.
-- **Variables de entorno**: `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` son las únicas necesarias en producción.
-- **Shutdown**: la app escucha `SIGTERM`/`SIGINT` y cierra limpiamente, incluyendo los timers pendientes de limpieza de mensajes.
-
-### Ejemplos opcionales por proveedor
-
-- **Railway** — `railway.json`: `builder: NIXPACKS`, `startCommand: pnpm start:prod`.
-- **Render** — `render.yaml`: `runtime: node`, build/start commands, `healthCheckPath: /healthz`.
-- **Coolify / Dokploy / Fly.io / DigitalOcean / Kubernetes**: soportan "build desde Dockerfile" de forma nativa.
-- **VPS (Ubuntu/Debian)**: instalar Node 22+/pnpm y correr `pnpm start:prod` (detrás de `systemd` o `pm2`), o Docker.
 
 ## Flujo del sistema
 
