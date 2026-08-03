@@ -5,6 +5,7 @@ import { MAX_HISTORY_SIZE } from '../../core/constants/history.constants';
 import { GameHistoryClient } from './game-history-client.interface';
 import { GameDto } from './game.dto';
 import { buildTipminerHistoryUrl, TipminerConfig } from './tipminer-endpoints';
+import { TIPMINER_BROWSER_HEADERS } from './tipminer-browser-headers';
 
 /**
  * Obtiene las últimas MAX_HISTORY_SIZE partidas desde la API pública de
@@ -40,6 +41,10 @@ export class TipminerGameHistoryClient implements GameHistoryClient {
 
   private buildHeaders(): Record<string, string> {
     const apiKey = this.configService.get<string>('tipminer.apiKey');
-    return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+    return {
+      ...TIPMINER_BROWSER_HEADERS,
+      Accept: 'application/json',
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    };
   }
 }
