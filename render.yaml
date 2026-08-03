@@ -1,0 +1,22 @@
+# Blueprint de Render (https://render.com/docs/blueprint-spec).
+# Ejemplo opcional: solo lo lee Render al crear un "Blueprint" apuntando a
+# este repo. No usa Docker — corre con el runtime nativo de Node, igual que
+# `railway.json` usa Nixpacks. Ninguna otra plataforma lee este archivo.
+#
+# Al crear el Blueprint en Render, te va a pedir los valores de las
+# variables marcadas `sync: false` (los tokens de Telegram): nunca se
+# guardan en el repo.
+
+services:
+  - name: bacbo-analysis-engine
+    type: web
+    runtime: node
+    plan: starter # cambia el plan aquí o desde el dashboard de Render
+    buildCommand: pnpm install --frozen-lockfile && pnpm build
+    startCommand: pnpm start:prod
+    healthCheckPath: /healthz
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
