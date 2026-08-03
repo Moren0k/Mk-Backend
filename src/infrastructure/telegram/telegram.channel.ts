@@ -78,6 +78,11 @@ export class TelegramChannel implements NotificationChannel {
   private buildMarkdownV2Text(notification: Notification): string {
     const title = escapeMarkdownV2(notification.title);
     const message = escapeMarkdownV2(notification.message);
+
+    if (title.length === 0) {
+      return message;
+    }
+
     return `*${title}*\n${message}`;
   }
 

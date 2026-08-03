@@ -39,6 +39,7 @@ export class Operation {
   readonly operationId: string;
   readonly strategyId: string;
   readonly recommendedWinner: WinnerType;
+  readonly streakWinner: WinnerType;
   readonly reason: string;
   readonly openedAt: Date;
 
@@ -59,6 +60,7 @@ export class Operation {
     operationId: string,
     strategyId: string,
     recommendedWinner: WinnerType,
+    streakWinner: WinnerType,
     maxMartingales: number,
     triggerGameId: string,
     reason: string,
@@ -67,6 +69,7 @@ export class Operation {
     this.operationId = operationId;
     this.strategyId = strategyId;
     this.recommendedWinner = recommendedWinner;
+    this.streakWinner = streakWinner;
     this.maxMartingales = maxMartingales;
     this.triggerGameId = triggerGameId;
     this.reason = reason;
@@ -82,6 +85,7 @@ export class Operation {
       randomUUID(),
       signal.strategyId,
       signal.recommendedWinner,
+      signal.streakWinner,
       signal.maxMartingales,
       signal.triggerGameUuid,
       signal.reason,
@@ -152,6 +156,7 @@ export class Operation {
       operationId: this.operationId,
       strategyId: this.strategyId,
       recommendedWinner: this.recommendedWinner,
+      streakWinner: this.streakWinner,
       currentState: this.state,
       currentMartingale: this.martingaleCount,
       maxMartingales: this.maxMartingales,

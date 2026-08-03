@@ -1,5 +1,6 @@
 import { NotificationChannelType } from '../enums/notification-channel-type.enum';
 import { NotificationSeverity } from '../enums/notification-severity.enum';
+import { WinnerType } from '../enums/winner-type.enum';
 import type { DistributionMetricValue } from '../metrics/types/distribution-metric-value.type';
 import { OperationSnapshot } from '../operation/types/operation-snapshot.type';
 import { formatBogotaHourLabel } from '../reporting/report-clock';
@@ -15,48 +16,38 @@ const REPORT_TITLE_BY_KIND: Readonly<Record<ReportKind, string>> = {
   [ReportKind.DAILY]: '📅 Reporte Diario',
 };
 
-function humanizeStrategyId(strategyId: string): string {
-  return strategyId
-    .split('-')
-    .filter((word) => word.length > 0)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
+function buildPatronLine(strategyId: string): string {
+  return `📊 PATRON: ${strategyId}`;
 }
 
-function formatTime(date: Date): string {
-  const pad = (value: number): string => value.toString().padStart(2, '0');
-  return `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
+function formatWinnerBall(winner: WinnerType): string {
+  return winner === WinnerType.PLAYER ? '🔵 P' : '🔴 B';
 }
 
-function buildOperationSummary(snapshot: OperationSnapshot): string {
-  return [
-    `Estrategia: ${humanizeStrategyId(snapshot.strategyId)}`,
-    `Entrada: ${snapshot.recommendedWinner}`,
-  ].join('\n');
-}
-
-/**
- * Convierte eventos de dominio (siempre un OperationSnapshot, en esta
- * etapa) en Notification. No conoce Telegram ni ningún canal concreto: solo
- * decide título/mensaje/severidad según qué ocurrió, y a qué channelType
- * queda dirigida (lo decide quién la llama, nunca esta clase).
- */
 export class NotificationFactory {
   createForOperationOpened(
     snapshot: OperationSnapshot,
     channel: NotificationChannelType,
     distribution?: DistributionMetricValue,
   ): Notification {
+    const streakBall = formatWinnerBall(snapshot.streakWinner);
+    const entryBall = formatWinnerBall(snapshot.recommendedWinner);
+
     return createNotification({
       channel,
       severity: NotificationSeverity.INFO,
-      title: '🚨 Nueva operación',
+      title: '',
       message: this.appendDistribution(
         [
-          buildOperationSummary(snapshot),
-          `Martingalas máximas: ${snapshot.maxMartingales}`,
-          `Motivo: ${snapshot.reason}`,
-          `Hora: ${formatTime(snapshot.openedAt)}`,
+          '🚨 NUEVA ENTRADA 🚨',
+          '',
+          '🎯 JUEGO: Bac Bo - Evolution',
+          buildPatronLine(snapshot.strategyId),
+          '',
+          `💣 INGRESAR DESPUES DE :${streakBall}`,
+          `🔥APUESTA EN: ${entryBall}`,
+          '',
+          `🔁 MARTINGALAS MAXIMO: ${snapshot.maxMartingales}`,
         ].join('\n'),
         distribution,
       ),
@@ -69,13 +60,23 @@ export class NotificationFactory {
     channel: NotificationChannelType,
     distribution?: DistributionMetricValue,
   ): Notification {
-    return this.createForMartingaleReached(
-      snapshot,
+    const ball = formatWinnerBall(snapshot.recommendedWinner);
+
+    return createNotification({
       channel,
-      1,
-      '⚠️ Martingala 1',
-      distribution,
-    );
+      severity: NotificationSeverity.WARNING,
+      title: '',
+      message: this.appendDistribution(
+        [
+          '🔁 MARTINGALA 1',
+          '',
+          buildPatronLine(snapshot.strategyId),
+          `🔥 DOBLA TU APUESTA ANTERIOR AL: ${ball}`,
+        ].join('\n'),
+        distribution,
+      ),
+      metadata: { operationId: snapshot.operationId, martingaleNumber: 1 },
+    });
   }
 
   createForMartingaleTwoReached(
@@ -83,13 +84,23 @@ export class NotificationFactory {
     channel: NotificationChannelType,
     distribution?: DistributionMetricValue,
   ): Notification {
-    return this.createForMartingaleReached(
-      snapshot,
+    const ball = formatWinnerBall(snapshot.recommendedWinner);
+
+    return createNotification({
       channel,
-      2,
-      '⚠️ Martingala 2',
-      distribution,
-    );
+      severity: NotificationSeverity.WARNING,
+      title: '',
+      message: this.appendDistribution(
+        [
+          '🔁 MARTINGALA 2',
+          '',
+          buildPatronLine(snapshot.strategyId),
+          `🔥 DOBLA TU APUESTA ANTERIOR AL: ${ball}`,
+        ].join('\n'),
+        distribution,
+      ),
+      metadata: { operationId: snapshot.operationId, martingaleNumber: 2 },
+    });
   }
 
   createForOperationWon(
@@ -100,9 +111,18 @@ export class NotificationFactory {
     return createNotification({
       channel,
       severity: NotificationSeverity.SUCCESS,
-      title: '✅ Operación ganada',
+      title: '',
       message: this.appendDistribution(
-        this.buildClosingMessage(snapshot),
+        [
+          '✅ OPERACION GANADA ✅',
+          '',
+          buildPatronLine(snapshot.strategyId),
+          '',
+          `🏆 VICTORIA EN: ${snapshot.recommendedWinner}`,
+          `🔁 MARTINGALAS FINAL: ${snapshot.currentMartingale}`,
+          '',
+          '💸 VAMOS POR MAS 💸',
+        ].join('\n'),
         distribution,
       ),
       metadata: { operationId: snapshot.operationId },
@@ -114,12 +134,23 @@ export class NotificationFactory {
     channel: NotificationChannelType,
     distribution?: DistributionMetricValue,
   ): Notification {
+    const ball = formatWinnerBall(snapshot.recommendedWinner);
+
     return createNotification({
       channel,
       severity: NotificationSeverity.ERROR,
-      title: '❌ Operación perdida',
+      title: '',
       message: this.appendDistribution(
-        this.buildClosingMessage(snapshot),
+        [
+          '❌ OPERACION PERDIDA ❌',
+          '',
+          buildPatronLine(snapshot.strategyId),
+          '',
+          `☠️ DERROTA: ${ball}`,
+          `🔁 MARTINGALAS FINAL: ${snapshot.currentMartingale}`,
+          '',
+          '🧊 MENTE FRIA, NOS RECUPERAMOS EN LA PROXIMA',
+        ].join('\n'),
         distribution,
       ),
       metadata: { operationId: snapshot.operationId },
@@ -145,16 +176,21 @@ export class NotificationFactory {
     channel: NotificationChannelType,
     distribution?: DistributionMetricValue,
   ): Notification {
+    const ball = formatWinnerBall(snapshot.recommendedWinner);
+
     return createNotification({
       channel,
       severity: NotificationSeverity.WARNING,
-      title: '⚠️ Empate',
+      title: '',
       message: this.appendDistribution(
         [
-          `Estrategia: ${humanizeStrategyId(snapshot.strategyId)}`,
-          `Entrada: ${snapshot.recommendedWinner}`,
-          `Estado: ${snapshot.currentState}`,
-          `Hora: ${formatTime(new Date())}`,
+          '🟰 EMPATE 🟰',
+          '',
+          buildPatronLine(snapshot.strategyId),
+          '',
+          `🔥 APUESTA LO ANTERIOR AL: ${ball}`,
+          '',
+          '💸 ESTA GANAREMOS 💸',
         ].join('\n'),
         distribution,
       ),
@@ -162,11 +198,6 @@ export class NotificationFactory {
     });
   }
 
-  /**
-   * Un único builder para reportes horarios y diarios: usan exactamente el
-   * mismo cuerpo de métricas (según lo pedido), solo cambia el título por
-   * `ReportKind`.
-   */
   private createForReport(
     report: ReportSnapshot,
     channel: NotificationChannelType,
@@ -205,39 +236,6 @@ export class NotificationFactory {
       `🔻 Perdidas: ${metrics.distribution.lostPct.toFixed(2)}%`,
       REPORT_DIVIDER,
       `⚠️ Martingalas agotadas: ${metrics.martingalesExhausted}`,
-    ].join('\n');
-  }
-
-  private createForMartingaleReached(
-    snapshot: OperationSnapshot,
-    channel: NotificationChannelType,
-    martingaleNumber: number,
-    title: string,
-    distribution?: DistributionMetricValue,
-  ): Notification {
-    const lastTransition = snapshot.history[snapshot.history.length - 1];
-
-    return createNotification({
-      channel,
-      severity: NotificationSeverity.WARNING,
-      title,
-      message: this.appendDistribution(
-        [
-          buildOperationSummary(snapshot),
-          `Motivo: ${lastTransition?.reason ?? snapshot.reason}`,
-          `Hora: ${formatTime(lastTransition?.timestamp ?? new Date())}`,
-        ].join('\n'),
-        distribution,
-      ),
-      metadata: { operationId: snapshot.operationId, martingaleNumber },
-    });
-  }
-
-  private buildClosingMessage(snapshot: OperationSnapshot): string {
-    return [
-      buildOperationSummary(snapshot),
-      `Martingala final: ${snapshot.currentMartingale}`,
-      `Hora: ${formatTime(snapshot.closedAt ?? new Date())}`,
     ].join('\n');
   }
 

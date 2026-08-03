@@ -73,6 +73,7 @@ describe('Streak3Strategy', () => {
     expect(result.triggered).toBe(true);
     if (result.triggered) {
       expect(result.recommendedWinner).toBe(WinnerType.BANKER);
+      expect(result.streakWinner).toBe(WinnerType.PLAYER);
       expect(result.strategyId).toBe(strategy.id);
       expect(result.strategyName).toBe(strategy.name);
       expect(result.triggeredAt).toEqual(new Date('2026-08-01T00:05:00.000Z'));
@@ -93,6 +94,7 @@ describe('Streak3Strategy', () => {
     expect(result.triggered).toBe(true);
     if (result.triggered) {
       expect(result.recommendedWinner).toBe(WinnerType.PLAYER);
+      expect(result.streakWinner).toBe(WinnerType.BANKER);
     }
   });
 
@@ -158,6 +160,7 @@ describe('Streak3Strategy', () => {
     expect(result.triggered).toBe(true);
     if (result.triggered) {
       expect(result.recommendedWinner).toBe(WinnerType.BANKER);
+      expect(result.streakWinner).toBe(WinnerType.PLAYER);
       expect(result.metadata.streakGameUuids).toEqual(['3', '4', '5']);
     }
   });
@@ -243,6 +246,7 @@ describe('Streak3Strategy', () => {
       expect(result.triggered).toBe(true);
       if (result.triggered) {
         expect(result.recommendedWinner).toBe(WinnerType.PLAYER);
+        expect(result.streakWinner).toBe(WinnerType.BANKER);
         expect(result.metadata.streakGameUuids).toEqual(['6', '7', '8']);
       }
     });
@@ -269,6 +273,7 @@ describe('Streak3Strategy', () => {
       expect(result.triggered).toBe(true);
       if (result.triggered) {
         expect(result.recommendedWinner).toBe(WinnerType.PLAYER);
+        expect(result.streakWinner).toBe(WinnerType.BANKER);
       }
     });
 

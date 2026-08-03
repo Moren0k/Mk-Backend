@@ -11,6 +11,7 @@ export type OperationSnapshot = {
   readonly operationId: string;
   readonly strategyId: string;
   readonly recommendedWinner: WinnerType;
+  readonly streakWinner: WinnerType;
   readonly currentState: OperationState;
   readonly currentMartingale: number;
   readonly maxMartingales: number;

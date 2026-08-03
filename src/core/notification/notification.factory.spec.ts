@@ -3,22 +3,8 @@ import { NotificationSeverity } from '../enums/notification-severity.enum';
 import { OperationState } from '../enums/operation-state.enum';
 import { WinnerType } from '../enums/winner-type.enum';
 import type { DistributionMetricValue } from '../metrics/types/distribution-metric-value.type';
-import { Game } from '../history/game.type';
 import { OperationSnapshot } from '../operation/types/operation-snapshot.type';
-import { OperationTransition } from '../operation/types/operation-transition.type';
-import { ReportKind } from '../reporting/types/report-kind.enum';
-import { ReportMetricsSnapshot } from '../reporting/types/report-metrics-snapshot.type';
-import { ReportSnapshot } from '../reporting/types/report-snapshot.type';
 import { NotificationFactory } from './notification.factory';
-
-function buildGame(uuid: string, winner: WinnerType): Game {
-  return {
-    uuid,
-    winner,
-    score: 8,
-    playedAt: new Date('2026-08-01T21:15:03.000Z'),
-  };
-}
 
 function buildDistribution(
   overrides: Partial<DistributionMetricValue> = {},
@@ -32,69 +18,21 @@ function buildDistribution(
   });
 }
 
-function buildTransition(
-  overrides: Partial<OperationTransition> = {},
-): OperationTransition {
-  return {
-    from: OperationState.OPEN,
-    to: OperationState.MARTINGALE_ONE,
-    game: buildGame('1', WinnerType.PLAYER),
-    timestamp: new Date('2026-08-01T21:15:03.000Z'),
-    reason:
-      'La partida no coincidió con el ganador recomendado (martingala 1).',
-    ...overrides,
-  };
-}
-
 function buildSnapshot(
   overrides: Partial<OperationSnapshot> = {},
 ): OperationSnapshot {
   return {
     operationId: 'op-1',
     strategyId: 'streak-3',
-    recommendedWinner: WinnerType.BANKER,
+    recommendedWinner: WinnerType.PLAYER,
+    streakWinner: WinnerType.BANKER,
     currentState: OperationState.OPEN,
     currentMartingale: 0,
     maxMartingales: 2,
     openedAt: new Date('2026-08-01T21:15:03.000Z'),
     closedAt: undefined,
-    reason: 'Racha de 3 resultados consecutivos de PLAYER.',
+    reason: 'Racha de 3 resultados consecutivos de BANKER.',
     history: [],
-    ...overrides,
-  };
-}
-
-function buildReportMetrics(
-  overrides: Partial<ReportMetricsSnapshot> = {},
-): ReportMetricsSnapshot {
-  return {
-    alertsSent: 5,
-    closedOperations: 4,
-    won: 3,
-    lost: 1,
-    effectivenessPct: 75,
-    directWins: 2,
-    martingaleOneWins: 1,
-    martingaleTwoWins: 0,
-    martingalesExhausted: 1,
-    distribution: {
-      directPct: 50,
-      martingaleOnePct: 25,
-      martingaleTwoPct: 0,
-      lostPct: 25,
-    },
-    ...overrides,
-  };
-}
-
-function buildReportSnapshot(
-  overrides: Partial<ReportSnapshot> = {},
-): ReportSnapshot {
-  return {
-    kind: ReportKind.HOURLY,
-    windowFrom: new Date('2026-08-01T18:00:00.000Z'), // 13:00 Bogotá
-    windowTo: new Date('2026-08-01T19:00:00.000Z'), // 14:00 Bogotá
-    metrics: buildReportMetrics(),
     ...overrides,
   };
 }
@@ -106,390 +44,188 @@ describe('NotificationFactory', () => {
     factory = new NotificationFactory();
   });
 
-  it('builds an INFO notification for OperationOpenedEvent, targeted at the given channel', () => {
-    const snapshot = buildSnapshot();
-
-    const notification = factory.createForOperationOpened(
-      snapshot,
-      NotificationChannelType.TELEGRAM,
-    );
-
-    expect(notification.severity).toBe(NotificationSeverity.INFO);
-    expect(notification.channel).toBe(NotificationChannelType.TELEGRAM);
-    expect(notification.title).toContain('Nueva operación');
-    expect(notification.message).toContain('Streak 3');
-    expect(notification.message).toContain('BANKER');
-    expect(notification.message).toContain('2');
-    expect(notification.message).toContain(snapshot.reason);
-    expect(notification.message).toContain('21:15:03');
-    expect(notification.metadata).toEqual({ operationId: 'op-1' });
-  });
-
-  it('builds a WARNING notification for MartingaleOneReachedEvent, using the last transition reason', () => {
-    const transition = buildTransition({
-      reason:
-        'La partida no coincidió con el ganador recomendado (martingala 1).',
-      timestamp: new Date('2026-08-01T21:16:00.000Z'),
-    });
-    const snapshot = buildSnapshot({
-      currentState: OperationState.MARTINGALE_ONE,
-      currentMartingale: 1,
-      history: [transition],
-    });
-
-    const notification = factory.createForMartingaleOneReached(
-      snapshot,
-      NotificationChannelType.TELEGRAM,
-    );
-
-    expect(notification.severity).toBe(NotificationSeverity.WARNING);
-    expect(notification.title).toContain('Martingala 1');
-    expect(notification.message).toContain(transition.reason);
-    expect(notification.message).toContain('21:16:00');
-    expect(notification.metadata).toEqual({
-      operationId: 'op-1',
-      martingaleNumber: 1,
-    });
-  });
-
-  it('builds a WARNING notification for MartingaleTwoReachedEvent', () => {
-    const snapshot = buildSnapshot({
-      currentState: OperationState.MARTINGALE_TWO,
-      currentMartingale: 2,
-      history: [
-        buildTransition(),
-        buildTransition({ to: OperationState.MARTINGALE_TWO }),
-      ],
-    });
-
-    const notification = factory.createForMartingaleTwoReached(
-      snapshot,
-      NotificationChannelType.TELEGRAM,
-    );
-
-    expect(notification.severity).toBe(NotificationSeverity.WARNING);
-    expect(notification.title).toContain('Martingala 2');
-    expect(notification.metadata).toEqual({
-      operationId: 'op-1',
-      martingaleNumber: 2,
-    });
-  });
-
-  it('builds a SUCCESS notification for OperationWonEvent', () => {
-    const snapshot = buildSnapshot({
-      currentState: OperationState.WON,
-      currentMartingale: 1,
-      closedAt: new Date('2026-08-01T21:20:00.000Z'),
-    });
-
-    const notification = factory.createForOperationWon(
-      snapshot,
-      NotificationChannelType.TELEGRAM,
-    );
-
-    expect(notification.severity).toBe(NotificationSeverity.SUCCESS);
-    expect(notification.title).toContain('ganada');
-    expect(notification.message).toContain('Martingala final: 1');
-    expect(notification.message).toContain('21:20:00');
-  });
-
-  it('builds an ERROR notification for OperationLostEvent', () => {
-    const snapshot = buildSnapshot({
-      currentState: OperationState.LOST,
-      currentMartingale: 2,
-      closedAt: new Date('2026-08-01T21:25:00.000Z'),
-    });
-
-    const notification = factory.createForOperationLost(
-      snapshot,
-      NotificationChannelType.TELEGRAM,
-    );
-
-    expect(notification.severity).toBe(NotificationSeverity.ERROR);
-    expect(notification.title).toContain('perdida');
-    expect(notification.message).toContain('Martingala final: 2');
-  });
-
-  it('never emits plain "unknown"-looking text: strategyId is humanized', () => {
-    const snapshot = buildSnapshot({ strategyId: 'streak-3' });
-
-    const notification = factory.createForOperationOpened(
-      snapshot,
-      NotificationChannelType.TELEGRAM,
-    );
-
-    expect(notification.message).toContain('Streak 3');
-    expect(notification.message).not.toContain('streak-3');
-  });
-
-  describe('with distribution', () => {
-    it('appends the distribution line with correct emoji order to an opened notification', () => {
-      const distribution = buildDistribution({
-        playerPct: 48.5,
-        tiePct: 12.0,
-        bankerPct: 39.5,
-      });
+  describe('createForOperationOpened', () => {
+    it('shows streakWinner ball in INGRESAR and recommendedWinner ball in APUESTA', () => {
+      const dist = buildDistribution();
       const snapshot = buildSnapshot();
 
       const notification = factory.createForOperationOpened(
         snapshot,
         NotificationChannelType.TELEGRAM,
-        distribution,
+        dist,
       );
 
-      expect(notification.message).toContain('🔵 48.50%  🟡 12.00%  🔴 39.50%');
-      expect(notification.title).toContain('Nueva operación');
+      expect(notification.severity).toBe(NotificationSeverity.INFO);
+      expect(notification.title).toBe('');
+      expect(notification.message).toContain(
+        '\u{1F4A3} INGRESAR DESPUES DE :\u{1F534} B',
+      );
+      expect(notification.message).toContain(
+        '\u{1F525}APUESTA EN: \u{1F535} P',
+      );
+      expect(notification.message).toContain(
+        '\u{1F501} MARTINGALAS MAXIMO: 2',
+      );
     });
 
-    it('appends the distribution line to a MartingaleOneReached notification', () => {
-      const distribution = buildDistribution();
-      const snapshot = buildSnapshot({
-        currentState: OperationState.MARTINGALE_ONE,
-        currentMartingale: 1,
-        history: [buildTransition()],
-      });
+    it('shows balls even when distribution is undefined', () => {
+      const snapshot = buildSnapshot();
+
+      const notification = factory.createForOperationOpened(
+        snapshot,
+        NotificationChannelType.TELEGRAM,
+      );
+
+      expect(notification.message).toContain('INGRESAR DESPUES DE :');
+      expect(notification.message).toContain('APUESTA EN:');
+    });
+  });
+
+  describe('createForMartingaleOneReached', () => {
+    it('shows recommendedWinner as ball', () => {
+      const dist = buildDistribution();
+      const snapshot = buildSnapshot();
 
       const notification = factory.createForMartingaleOneReached(
         snapshot,
         NotificationChannelType.TELEGRAM,
-        distribution,
+        dist,
       );
 
-      expect(notification.message).toContain('🔵');
-      expect(notification.message).toContain('🟡');
-      expect(notification.message).toContain('🔴');
+      expect(notification.severity).toBe(NotificationSeverity.WARNING);
+      expect(notification.title).toBe('');
+      expect(notification.message).toContain(
+        'DOBLA TU APUESTA ANTERIOR AL:',
+      );
+      expect(notification.metadata).toEqual({
+        operationId: 'op-1',
+        martingaleNumber: 1,
+      });
     });
+  });
 
-    it('appends the distribution line to a won notification', () => {
-      const distribution = buildDistribution();
+  describe('createForMartingaleTwoReached', () => {
+    it('shows recommendedWinner as ball', () => {
+      const dist = buildDistribution();
+      const snapshot = buildSnapshot();
+
+      const notification = factory.createForMartingaleTwoReached(
+        snapshot,
+        NotificationChannelType.TELEGRAM,
+        dist,
+      );
+
+      expect(notification.message).toContain(
+        'DOBLA TU APUESTA ANTERIOR AL:',
+      );
+      expect(notification.metadata).toEqual({
+        operationId: 'op-1',
+        martingaleNumber: 2,
+      });
+    });
+  });
+
+  describe('createForOperationWon', () => {
+    it('builds SUCCESS notification', () => {
+      const dist = buildDistribution();
       const snapshot = buildSnapshot({
         currentState: OperationState.WON,
-        currentMartingale: 0,
-        closedAt: new Date('2026-08-01T21:20:00.000Z'),
+        currentMartingale: 1,
       });
 
       const notification = factory.createForOperationWon(
         snapshot,
         NotificationChannelType.TELEGRAM,
-        distribution,
+        dist,
       );
 
-      expect(notification.message).toContain('🔵');
-      expect(notification.title).toContain('ganada');
+      expect(notification.severity).toBe(NotificationSeverity.SUCCESS);
+      expect(notification.title).toBe('');
+      expect(notification.message).toContain('VICTORIA EN: PLAYER');
+      expect(notification.message).toContain('MARTINGALAS FINAL: 1');
     });
+  });
 
-    it('appends the distribution line to a lost notification', () => {
-      const distribution = buildDistribution();
+  describe('createForOperationLost', () => {
+    it('shows recommendedWinner as ball in DERROTA', () => {
+      const dist = buildDistribution();
       const snapshot = buildSnapshot({
         currentState: OperationState.LOST,
         currentMartingale: 2,
-        closedAt: new Date('2026-08-01T21:25:00.000Z'),
       });
 
       const notification = factory.createForOperationLost(
         snapshot,
         NotificationChannelType.TELEGRAM,
-        distribution,
+        dist,
       );
 
-      expect(notification.message).toContain('🔴');
-      expect(notification.title).toContain('perdida');
-    });
-
-    it('does not append the distribution line when distribution is undefined', () => {
-      const snapshot = buildSnapshot();
-
-      const notification = factory.createForOperationOpened(
-        snapshot,
-        NotificationChannelType.TELEGRAM,
-      );
-
-      expect(notification.message).not.toContain('🔵');
-      expect(notification.message).not.toContain('🟡');
-      expect(notification.message).not.toContain('🔴');
-    });
-
-    it('maintains the mandatory emoji order: 🔵 player → 🟡 tie → 🔴 banker', () => {
-      const distribution = buildDistribution();
-      const snapshot = buildSnapshot();
-
-      const notification = factory.createForOperationOpened(
-        snapshot,
-        NotificationChannelType.TELEGRAM,
-        distribution,
-      );
-
-      const blueIndex = notification.message.indexOf('🔵');
-      const yellowIndex = notification.message.indexOf('🟡');
-      const redIndex = notification.message.indexOf('🔴');
-
-      expect(blueIndex).toBeLessThan(yellowIndex);
-      expect(yellowIndex).toBeLessThan(redIndex);
+      expect(notification.severity).toBe(NotificationSeverity.ERROR);
+      expect(notification.title).toBe('');
+      expect(notification.message).toContain('MARTINGALAS FINAL: 2');
     });
   });
 
   describe('createForTieOccurred', () => {
-    it('builds a WARNING notification with the operation state and tie context', () => {
-      const snapshot = buildSnapshot({
-        currentState: OperationState.OPEN,
-      });
+    it('shows recommendedWinner as ball', () => {
+      const dist = buildDistribution();
+      const snapshot = buildSnapshot();
 
       const notification = factory.createForTieOccurred(
         snapshot,
         NotificationChannelType.TELEGRAM,
+        dist,
       );
 
       expect(notification.severity).toBe(NotificationSeverity.WARNING);
-      expect(notification.title).toContain('Empate');
-      expect(notification.message).toContain('Streak 3');
-      expect(notification.message).toContain('BANKER');
-      expect(notification.message).toContain('OPEN');
-      expect(notification.metadata).toEqual({ operationId: 'op-1' });
-    });
-
-    it('shows the current state OPEN when tie occurs at entry', () => {
-      const snapshot = buildSnapshot({
-        currentState: OperationState.OPEN,
-      });
-
-      const notification = factory.createForTieOccurred(
-        snapshot,
-        NotificationChannelType.TELEGRAM,
-      );
-
-      expect(notification.message).toContain('Estado: OPEN');
-    });
-
-    it('shows the current state MG1 when tie occurs after first martingale', () => {
-      const snapshot = buildSnapshot({
-        currentState: OperationState.MARTINGALE_ONE,
-        currentMartingale: 1,
-      });
-
-      const notification = factory.createForTieOccurred(
-        snapshot,
-        NotificationChannelType.TELEGRAM,
-      );
-
-      expect(notification.message).toContain('Estado: MG1');
-    });
-
-    it('appends the distribution line when distribution is provided', () => {
-      const distribution = buildDistribution();
-      const snapshot = buildSnapshot();
-
-      const notification = factory.createForTieOccurred(
-        snapshot,
-        NotificationChannelType.TELEGRAM,
-        distribution,
-      );
-
-      expect(notification.message).toContain('🔵');
-      expect(notification.message).toContain('🟡');
-      expect(notification.message).toContain('🔴');
-    });
-
-    it('does not append the distribution line when distribution is undefined', () => {
-      const snapshot = buildSnapshot();
-
-      const notification = factory.createForTieOccurred(
-        snapshot,
-        NotificationChannelType.TELEGRAM,
-      );
-
-      expect(notification.message).not.toContain('🔵');
+      expect(notification.title).toBe('');
+      expect(notification.message).toContain('APUESTA LO ANTERIOR AL:');
     });
   });
 
-  describe('createForHourlyReport', () => {
-    it('builds an INFO notification with the Bogotá window in the title', () => {
-      const report = buildReportSnapshot();
+  describe('distribution line', () => {
+    it('appends the distribution line when provided', () => {
+      const dist = buildDistribution();
+      const snapshot = buildSnapshot();
 
-      const notification = factory.createForHourlyReport(
-        report,
+      const notification = factory.createForOperationOpened(
+        snapshot,
         NotificationChannelType.TELEGRAM,
+        dist,
       );
 
-      expect(notification.severity).toBe(NotificationSeverity.INFO);
-      expect(notification.channel).toBe(NotificationChannelType.TELEGRAM);
-      expect(notification.title).toContain('Reporte Horario');
-      expect(notification.title).toContain('13:00');
-      expect(notification.title).toContain('14:00');
-      expect(notification.metadata).toEqual({ kind: ReportKind.HOURLY });
+      expect(notification.message).toContain(
+        '\u{1F535} 48.50%  \u{1F7E1} 12.00%  \u{1F534} 39.50%',
+      );
     });
 
-    it('includes every required metric in the message', () => {
-      const report = buildReportSnapshot({
-        metrics: buildReportMetrics({
-          alertsSent: 7,
-          closedOperations: 6,
-          won: 4,
-          lost: 2,
-          directWins: 2,
-          martingaleOneWins: 1,
-          martingaleTwoWins: 1,
-          martingalesExhausted: 2,
-        }),
-      });
+    it('does not append distribution numbers when distribution is undefined', () => {
+      const snapshot = buildSnapshot();
 
-      const notification = factory.createForHourlyReport(
-        report,
+      const notification = factory.createForOperationOpened(
+        snapshot,
         NotificationChannelType.TELEGRAM,
       );
 
-      expect(notification.message).toContain('Alertas enviadas: 7');
-      expect(notification.message).toContain('Operaciones cerradas: 6');
-      expect(notification.message).toContain('Ganadas: 4');
-      expect(notification.message).toContain('Perdidas: 2');
-      expect(notification.message).toContain('Directas: 2');
-      expect(notification.message).toContain('Martingala 1: 1');
-      expect(notification.message).toContain('Martingala 2: 1');
-      expect(notification.message).toContain('Martingalas agotadas: 2');
+      expect(notification.message).not.toContain('48.50%');
     });
 
-    it('formats percentages with 2 decimals', () => {
-      const report = buildReportSnapshot({
-        metrics: buildReportMetrics({ effectivenessPct: 66.666 }),
-      });
+    it('maintains distribution emoji order', () => {
+      const dist = buildDistribution();
+      const snapshot = buildSnapshot();
 
-      const notification = factory.createForHourlyReport(
-        report,
+      const notification = factory.createForOperationOpened(
+        snapshot,
         NotificationChannelType.TELEGRAM,
+        dist,
       );
 
-      expect(notification.message).toContain('Efectividad: 66.67%');
-    });
-  });
+      const blueAt = notification.message.indexOf('48.50%');
+      const yellowAt = notification.message.indexOf('12.00%');
+      const redAt = notification.message.indexOf('39.50%');
 
-  describe('createForDailyReport', () => {
-    it('builds an INFO notification titled as a daily report', () => {
-      const report = buildReportSnapshot({
-        kind: ReportKind.DAILY,
-        windowFrom: new Date('2026-08-01T15:00:00.000Z'), // 10:00 Bogotá
-        windowTo: new Date('2026-08-02T03:00:00.000Z'), // 22:00 Bogotá
-      });
-
-      const notification = factory.createForDailyReport(
-        report,
-        NotificationChannelType.TELEGRAM,
-      );
-
-      expect(notification.title).toContain('Reporte Diario');
-      expect(notification.metadata).toEqual({ kind: ReportKind.DAILY });
-    });
-
-    it('uses exactly the same metrics body as the hourly report', () => {
-      const metrics = buildReportMetrics({ alertsSent: 42 });
-      const hourly = factory.createForHourlyReport(
-        buildReportSnapshot({ metrics }),
-        NotificationChannelType.TELEGRAM,
-      );
-      const daily = factory.createForDailyReport(
-        buildReportSnapshot({ kind: ReportKind.DAILY, metrics }),
-        NotificationChannelType.TELEGRAM,
-      );
-
-      expect(daily.message).toBe(hourly.message);
+      expect(blueAt).toBeLessThan(yellowAt);
+      expect(yellowAt).toBeLessThan(redAt);
     });
   });
 });

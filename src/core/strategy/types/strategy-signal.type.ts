@@ -17,6 +17,7 @@ export type StrategySignal = {
   readonly strategyName: string;
   readonly triggeredAt: Date;
   readonly recommendedWinner: WinnerType;
+  readonly streakWinner: WinnerType;
   readonly maxMartingales: number;
   readonly triggerGameUuid: string;
   readonly reason: string;
