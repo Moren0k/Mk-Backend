@@ -53,7 +53,10 @@ export class NotificationFactory {
         ].join('\n'),
         distribution,
       ),
-      metadata: { operationId: snapshot.operationId },
+      metadata: {
+        operationId: snapshot.operationId,
+        strategyId: snapshot.strategyId,
+      },
     });
   }
 
@@ -77,7 +80,11 @@ export class NotificationFactory {
         ].join('\n'),
         distribution,
       ),
-      metadata: { operationId: snapshot.operationId, martingaleNumber: 1 },
+      metadata: {
+        operationId: snapshot.operationId,
+        strategyId: snapshot.strategyId,
+        martingaleNumber: 1,
+      },
     });
   }
 
@@ -101,7 +108,11 @@ export class NotificationFactory {
         ].join('\n'),
         distribution,
       ),
-      metadata: { operationId: snapshot.operationId, martingaleNumber: 2 },
+      metadata: {
+        operationId: snapshot.operationId,
+        strategyId: snapshot.strategyId,
+        martingaleNumber: 2,
+      },
     });
   }
 
@@ -127,7 +138,10 @@ export class NotificationFactory {
         ].join('\n'),
         distribution,
       ),
-      metadata: { operationId: snapshot.operationId },
+      metadata: {
+        operationId: snapshot.operationId,
+        strategyId: snapshot.strategyId,
+      },
     });
   }
 
@@ -155,7 +169,10 @@ export class NotificationFactory {
         ].join('\n'),
         distribution,
       ),
-      metadata: { operationId: snapshot.operationId },
+      metadata: {
+        operationId: snapshot.operationId,
+        strategyId: snapshot.strategyId,
+      },
     });
   }
 
@@ -220,7 +237,10 @@ export class NotificationFactory {
         ].join('\n'),
         distribution,
       ),
-      metadata: { operationId: snapshot.operationId },
+      metadata: {
+        operationId: snapshot.operationId,
+        strategyId: snapshot.strategyId,
+      },
     });
   }
 

@@ -156,6 +156,7 @@ describe('NotificationFactory', () => {
       expect(notification.message).toContain('DOBLA TU APUESTA ANTERIOR AL:');
       expect(notification.metadata).toEqual({
         operationId: 'op-1',
+        strategyId: 'streak-3',
         martingaleNumber: 1,
       });
     });
@@ -175,6 +176,7 @@ describe('NotificationFactory', () => {
       expect(notification.message).toContain('DOBLA TU APUESTA ANTERIOR AL:');
       expect(notification.metadata).toEqual({
         operationId: 'op-1',
+        strategyId: 'streak-3',
         martingaleNumber: 2,
       });
     });

@@ -1,5 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Logger } from '@nestjs/common';
 
 import { NotificationChannelType } from '../../core/enums/notification-channel-type.enum';
 import type { NotificationChannel } from '../../core/interfaces/notification-channel.interface';
@@ -12,6 +11,24 @@ import { MAX_SEND_ATTEMPTS, RETRY_DELAY_MS } from './telegram-retry.constants';
 const TELEGRAM_API_BASE_URL = 'https://api.telegram.org';
 
 /**
+ * Configuración de una instancia de TelegramChannel: token/chatId del bot al
+ * que apunta, y el criterio para decidir qué estrategias le corresponden.
+ *
+ * Se recibe por constructor (en vez de leerse de ConfigService dentro de la
+ * clase) para poder registrar más de una instancia de TelegramChannel —cada
+ * una con su propio bot y su propio filtro— sin duplicar la lógica de envío
+ * (ver NotificationModule, que arma una instancia "oficial" y otra "de
+ * pruebas" a partir de esta misma clase).
+ */
+export type TelegramChannelConfig = {
+  readonly label: string;
+  readonly channelType: NotificationChannelType;
+  readonly botToken: string | undefined;
+  readonly chatId: string | undefined;
+  readonly isStrategyAllowed: (strategyId: string | undefined) => boolean;
+};
+
+/**
  * Único canal que sabe que Telegram existe. No conoce Operation, Strategy,
  * History ni ningún DomainEvent: únicamente recibe una Notification ya
  * construida por NotificationFactory y la envía.
@@ -19,26 +36,26 @@ const TELEGRAM_API_BASE_URL = 'https://api.telegram.org';
  * Usa HTTP directo contra la API oficial de Bot de Telegram (sendMessage),
  * sin librerías externas: es un único POST con `fetch` nativo de Node.
  */
-@Injectable()
 export class TelegramChannel implements NotificationChannel {
   private readonly logger = new Logger(TelegramChannel.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly config: TelegramChannelConfig) {}
 
   getChannelType(): NotificationChannelType {
-    return NotificationChannelType.TELEGRAM;
+    return this.config.channelType;
   }
 
   name(): string {
-    return 'Telegram';
+    return `Telegram (${this.config.label})`;
   }
 
   enabled(): boolean {
     return Boolean(this.botToken && this.chatId);
   }
 
-  supports(): boolean {
-    return true;
+  supports(notification: Notification): boolean {
+    const strategyId = notification.metadata.strategyId as string | undefined;
+    return this.config.isStrategyAllowed(strategyId);
   }
 
   async send(notification: Notification): Promise<SendResult> {
@@ -90,11 +107,11 @@ export class TelegramChannel implements NotificationChannel {
   }
 
   private get botToken(): string | undefined {
-    return this.configService.get<string>('telegram.botToken');
+    return this.config.botToken;
   }
 
   private get chatId(): string | undefined {
-    return this.configService.get<string>('telegram.chatId');
+    return this.config.chatId;
   }
 
   private buildMarkdownV2Text(notification: Notification): string {

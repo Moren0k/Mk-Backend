@@ -1,13 +1,81 @@
 import { Module, Provider } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
-import { NOTIFICATION_CHANNELS } from '../../core/constants/injection-tokens.constants';
+import {
+  NOTIFICATION_CHANNELS,
+  TELEGRAM_OFFICIAL_CHANNEL,
+  TELEGRAM_TEST_CHANNEL,
+} from '../../core/constants/injection-tokens.constants';
+import { NotificationChannelType } from '../../core/enums/notification-channel-type.enum';
 import { NotificationFactory } from '../../core/notification/notification.factory';
-import { TelegramChannel } from '../../infrastructure/telegram/telegram.channel';
+import {
+  TelegramChannel,
+  TelegramChannelConfig,
+} from '../../infrastructure/telegram/telegram.channel';
 import { DomainEventBusModule } from '../domain-events/domain-event-bus.module';
 import { DistributionMetricModule } from '../metrics/distribution-metric.module';
 import { ErrorTrackingModule } from '../observability/error-tracking.module';
 import { NotificationCoordinator } from './notification.coordinator';
 import { MessageTracker } from './message-tracker';
+
+/**
+ * Estrategias cuyas señales son solo para probar en paralelo a producción:
+ * sus notificaciones nunca deben llegar al canal oficial, solo al de
+ * pruebas. Único lugar a tocar si mañana se agrega otra estrategia "de
+ * pruebas" (ver Streak4Strategy).
+ */
+const TEST_ONLY_STRATEGY_IDS: ReadonlySet<string> = new Set(['streak-4']);
+
+/** Tokens privados de este módulo: solo unen la config con su canal. */
+const TELEGRAM_OFFICIAL_CONFIG = Symbol('TelegramOfficialConfig');
+const TELEGRAM_TEST_CONFIG = Symbol('TelegramTestConfig');
+
+function isTestOnlyStrategy(strategyId: string | undefined): boolean {
+  return strategyId !== undefined && TEST_ONLY_STRATEGY_IDS.has(strategyId);
+}
+
+/**
+ * TelegramChannel es una clase parametrizable (ver su config), no un
+ * singleton: aquí se arman dos instancias —oficial y de pruebas—, cada una
+ * con su propio bot/chat y su propio criterio de qué estrategias le
+ * corresponden, reutilizando toda la lógica de envío/reintentos sin
+ * duplicarla.
+ */
+const officialTelegramConfigProvider: Provider = {
+  provide: TELEGRAM_OFFICIAL_CONFIG,
+  useFactory: (configService: ConfigService): TelegramChannelConfig => ({
+    label: 'Oficial',
+    channelType: NotificationChannelType.TELEGRAM,
+    botToken: configService.get<string>('telegram.botToken'),
+    chatId: configService.get<string>('telegram.chatId'),
+    isStrategyAllowed: (strategyId) => !isTestOnlyStrategy(strategyId),
+  }),
+  inject: [ConfigService],
+};
+
+const testTelegramConfigProvider: Provider = {
+  provide: TELEGRAM_TEST_CONFIG,
+  useFactory: (configService: ConfigService): TelegramChannelConfig => ({
+    label: 'Pruebas',
+    channelType: NotificationChannelType.TELEGRAM_PRUEBAS,
+    botToken: configService.get<string>('telegram.pruebas.botToken'),
+    chatId: configService.get<string>('telegram.pruebas.chatId'),
+    isStrategyAllowed: (strategyId) => isTestOnlyStrategy(strategyId),
+  }),
+  inject: [ConfigService],
+};
+
+const officialTelegramChannelProvider: Provider = {
+  provide: TELEGRAM_OFFICIAL_CHANNEL,
+  useFactory: (config: TelegramChannelConfig) => new TelegramChannel(config),
+  inject: [TELEGRAM_OFFICIAL_CONFIG],
+};
+
+const testTelegramChannelProvider: Provider = {
+  provide: TELEGRAM_TEST_CHANNEL,
+  useFactory: (config: TelegramChannelConfig) => new TelegramChannel(config),
+  inject: [TELEGRAM_TEST_CONFIG],
+};
 
 /**
  * NestJS no tiene "multi providers" nativos (ver StrategyModule para el
@@ -18,8 +86,11 @@ import { MessageTracker } from './message-tracker';
  */
 const notificationChannelsProvider: Provider = {
   provide: NOTIFICATION_CHANNELS,
-  useFactory: (telegram: TelegramChannel) => [telegram],
-  inject: [TelegramChannel],
+  useFactory: (official: TelegramChannel, test: TelegramChannel) => [
+    official,
+    test,
+  ],
+  inject: [TELEGRAM_OFFICIAL_CHANNEL, TELEGRAM_TEST_CHANNEL],
 };
 
 @Module({
@@ -31,8 +102,11 @@ const notificationChannelsProvider: Provider = {
   providers: [
     NotificationCoordinator,
     NotificationFactory,
-    TelegramChannel,
     MessageTracker,
+    officialTelegramConfigProvider,
+    testTelegramConfigProvider,
+    officialTelegramChannelProvider,
+    testTelegramChannelProvider,
     notificationChannelsProvider,
   ],
   exports: [NOTIFICATION_CHANNELS, NotificationFactory],

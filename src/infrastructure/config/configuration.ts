@@ -16,6 +16,13 @@ export default () => ({
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN,
     chatId: process.env.TELEGRAM_CHAT_ID,
+    // Bot/chat separado usado exclusivamente por estrategias de prueba
+    // (ver Streak4Strategy y NotificationModule): nunca reciben nada del
+    // canal oficial ni viceversa.
+    pruebas: {
+      botToken: process.env.TELEGRAM_PRUEBAS_BOT_TOKEN,
+      chatId: process.env.TELEGRAM_PRUEBAS_CHAT_ID,
+    },
   },
   tipminer: {
     baseUrl:

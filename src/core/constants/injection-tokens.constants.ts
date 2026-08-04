@@ -9,5 +9,7 @@ export const HISTORY_STORE = Symbol('HistoryStore');
 export const DOMAIN_EVENT_BUS = Symbol('DomainEventBus');
 export const STRATEGIES = Symbol('Strategies');
 export const NOTIFICATION_CHANNELS = Symbol('NotificationChannels');
+export const TELEGRAM_OFFICIAL_CHANNEL = Symbol('TelegramOfficialChannel');
+export const TELEGRAM_TEST_CHANNEL = Symbol('TelegramTestChannel');
 export const STRATEGY_EXECUTION_GUARD = Symbol('StrategyExecutionGuard');
 export const OPERATION_REPORT_STORE = Symbol('OperationReportStore');
