@@ -7,6 +7,20 @@ genera y envía por Telegram el resumen completo de todo lo ocurrido desde
 que arrancó el proceso (sin límite de tiempo), y además lo devuelve en la
 respuesta HTTP.
 
+Además del comando, el body acepta un campo opcional `channel` para elegir a
+qué bot de Telegram se envía el resumen:
+
+| `channel`   | A dónde se envía                                                                       |
+| ----------- | -------------------------------------------------------------------------------------- |
+| `"oficial"` | Solo al bot/chat oficial (`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`).                    |
+| `"pruebas"` | Solo al bot/chat de pruebas (`TELEGRAM_PRUEBAS_BOT_TOKEN`/`TELEGRAM_PRUEBAS_CHAT_ID`). |
+| `"todos"`   | A ambos. **Es el valor por defecto si no envías `channel`.**                           |
+
+A diferencia de las alertas automáticas de estrategias (donde streak-3 va
+siempre al canal oficial y streak-4 siempre al de pruebas, sin excepción),
+el resumen no está atado a ninguna estrategia: por eso puedes elegir
+libremente su destino con este campo.
+
 ## 1. Configurar la contraseña
 
 Agrega esta variable a tu `.env` local (nunca la subas al repositorio):
@@ -33,9 +47,20 @@ puesto en `PORT`).
 ### Con curl (Git Bash / WSL / macOS / Linux)
 
 ```bash
+# Sin "channel" -> por defecto envía a ambos bots ("todos")
 curl -X POST http://localhost:3000/admin/commands \
   -H "Content-Type: application/json" \
-  -d '{"password":"una-contraseña-cualquiera","command":"RESUMEN"}'
+  -d '{"password":"MYK","command":"RESUMEN"}'
+
+# Solo al bot oficial
+curl -X POST http://localhost:3000/admin/commands \
+  -H "Content-Type: application/json" \
+  -d '{"password":"una-contraseña-cualquiera","command":"RESUMEN","channel":"oficial"}'
+
+# Solo al bot de pruebas
+curl -X POST http://localhost:3000/admin/commands \
+  -H "Content-Type: application/json" \
+  -d '{"password":"una-contraseña-cualquiera","command":"RESUMEN","channel":"pruebas"}'
 ```
 
 ### Con PowerShell
@@ -43,7 +68,7 @@ curl -X POST http://localhost:3000/admin/commands \
 ```powershell
 Invoke-RestMethod -Method Post -Uri "http://localhost:3000/admin/commands" `
   -ContentType "application/json" `
-  -Body (@{ password = "una-contraseña-cualquiera"; command = "RESUMEN" } | ConvertTo-Json)
+  -Body (@{ password = "MYK"; command = "RESUMEN"; channel = "pruebas" } | ConvertTo-Json)
 ```
 
 ### Respuesta esperada (200 OK)
@@ -52,6 +77,7 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:3000/admin/commands" `
 {
   "ok": true,
   "command": "RESUMEN",
+  "channel": "pruebas",
   "dispatchedAt": "2026-08-03T05:24:07.608Z",
   "metrics": {
     "alertsSent": 12,
@@ -88,17 +114,22 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:3000/admin/commands" `
 }
 ```
 
-Si tienes `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` configurados, este mismo
-comando también envía el mensaje "dashboard" al chat de Telegram.
+Si tienes configurado el bot correspondiente al `channel` elegido
+(`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` para `"oficial"`,
+`TELEGRAM_PRUEBAS_BOT_TOKEN`/`TELEGRAM_PRUEBAS_CHAT_ID` para `"pruebas"`),
+este mismo comando también envía el mensaje "dashboard" a ese chat de
+Telegram. Si un bot no tiene sus variables configuradas, simplemente no
+recibe nada (no genera error).
 
 ## 4. Casos de error, para probar que la seguridad funciona
 
-| Escenario                              | Body                                     | Respuesta esperada         |
-| -------------------------------------- | ---------------------------------------- | -------------------------- |
-| Sin `password`                         | `{"command":"RESUMEN"}`                  | `401 Unauthorized`         |
-| `password` incorrecta                  | `{"password":"mal","command":"RESUMEN"}` | `401 Unauthorized`         |
-| Comando desconocido                    | `{"password":"...","command":"OTRO"}`    | `400 Bad Request`          |
-| `ADMIN_PASSWORD` no definida en `.env` | cualquiera                               | `401 Unauthorized` siempre |
+| Escenario                              | Body                                                         | Respuesta esperada         |
+| -------------------------------------- | ------------------------------------------------------------ | -------------------------- |
+| Sin `password`                         | `{"command":"RESUMEN"}`                                      | `401 Unauthorized`         |
+| `password` incorrecta                  | `{"password":"mal","command":"RESUMEN"}`                     | `401 Unauthorized`         |
+| Comando desconocido                    | `{"password":"...","command":"OTRO"}`                        | `400 Bad Request`          |
+| `channel` desconocido                  | `{"password":"...","command":"RESUMEN","channel":"discord"}` | `400 Bad Request`          |
+| `ADMIN_PASSWORD` no definida en `.env` | cualquiera                                                   | `401 Unauthorized` siempre |
 
 ```bash
 # Sin password -> 401
@@ -115,6 +146,11 @@ curl -i -X POST http://localhost:3000/admin/commands \
 curl -i -X POST http://localhost:3000/admin/commands \
   -H "Content-Type: application/json" \
   -d '{"password":"una-contraseña-cualquiera","command":"OTRO"}'
+
+# Channel inválido -> 400
+curl -i -X POST http://localhost:3000/admin/commands \
+  -H "Content-Type: application/json" \
+  -d '{"password":"una-contraseña-cualquiera","command":"RESUMEN","channel":"discord"}'
 ```
 
 ## Notas
@@ -123,3 +159,7 @@ curl -i -X POST http://localhost:3000/admin/commands \
   bot lleva días corriendo, el resumen refleja todo ese tiempo.
 - Este endpoint no afecta el reporte horario automático ni ninguna otra
   parte del motor — es un flujo aparte que solo lee el mismo historial.
+- El reporte horario automático y las alertas de estrategias no usan
+  `channel`: siguen su propio enrutamiento fijo (streak-3 → oficial,
+  streak-4 → pruebas, reportes automáticos → oficial). El campo `channel`
+  solo existe para este comando `RESUMEN` bajo demanda.
