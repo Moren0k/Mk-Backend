@@ -50,7 +50,7 @@ puesto en `PORT`).
 # Sin "channel" -> por defecto envía a ambos bots ("todos")
 curl -X POST http://localhost:3000/admin/commands \
   -H "Content-Type: application/json" \
-  -d '{"password":"MYK","command":"RESUMEN"}'
+  -d '{"password":"una-contraseña-cualquiera","command":"RESUMEN"}'
 
 # Solo al bot oficial
 curl -X POST http://localhost:3000/admin/commands \
@@ -68,7 +68,7 @@ curl -X POST http://localhost:3000/admin/commands \
 ```powershell
 Invoke-RestMethod -Method Post -Uri "http://localhost:3000/admin/commands" `
   -ContentType "application/json" `
-  -Body (@{ password = "MYK"; command = "RESUMEN"; channel = "pruebas" } | ConvertTo-Json)
+  -Body (@{ password = "MYK"; command = "RESUMEN"} | ConvertTo-Json)
 ```
 
 ### Respuesta esperada (200 OK)
@@ -159,7 +159,3 @@ curl -i -X POST http://localhost:3000/admin/commands \
   bot lleva días corriendo, el resumen refleja todo ese tiempo.
 - Este endpoint no afecta el reporte horario automático ni ninguna otra
   parte del motor — es un flujo aparte que solo lee el mismo historial.
-- El reporte horario automático y las alertas de estrategias no usan
-  `channel`: siguen su propio enrutamiento fijo (streak-3 → oficial,
-  streak-4 → pruebas, reportes automáticos → oficial). El campo `channel`
-  solo existe para este comando `RESUMEN` bajo demanda.

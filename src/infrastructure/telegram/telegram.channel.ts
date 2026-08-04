@@ -26,6 +26,13 @@ export type TelegramChannelConfig = {
   readonly botToken: string | undefined;
   readonly chatId: string | undefined;
   readonly isStrategyAllowed: (strategyId: string | undefined) => boolean;
+  /**
+   * Interruptor adicional, independiente de tener token/chatId configurados
+   * (ver TELEGRAM_PRUEBAS_ENABLED): permite apagar por completo el envío de
+   * una instancia concreta —hoy solo la de pruebas— sin desregistrarla ni
+   * tocar su config. Si se omite, se asume habilitado.
+   */
+  readonly enabledWhen?: () => boolean;
 };
 
 /**
@@ -50,7 +57,10 @@ export class TelegramChannel implements NotificationChannel {
   }
 
   enabled(): boolean {
-    return Boolean(this.botToken && this.chatId);
+    return (
+      Boolean(this.botToken && this.chatId) &&
+      (this.config.enabledWhen?.() ?? true)
+    );
   }
 
   supports(notification: Notification): boolean {

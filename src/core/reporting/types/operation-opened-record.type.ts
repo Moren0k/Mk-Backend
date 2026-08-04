@@ -5,5 +5,6 @@
  */
 export type OperationOpenedRecord = {
   readonly operationId: string;
+  readonly strategyId: string;
   readonly openedAt: Date;
 };

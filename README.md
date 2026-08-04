@@ -51,6 +51,7 @@ pnpm start:dev
 | `TELEGRAM_CHAT_ID` | Id del chat/grupo oficial donde el bot envía las alertas. |
 | `TELEGRAM_PRUEBAS_BOT_TOKEN` | Token del bot de Telegram de pruebas. Recibe exclusivamente las señales de estrategias marcadas como "solo pruebas" (hoy, Streak4Strategy); nunca las del canal oficial. |
 | `TELEGRAM_PRUEBAS_CHAT_ID` | Id del chat/grupo de pruebas asociado a `TELEGRAM_PRUEBAS_BOT_TOKEN`. |
+| `TELEGRAM_PRUEBAS_ENABLED` | Interruptor de modo pruebas (`true`/`false`, default `true`). En `false`, el chat de pruebas no recibe absolutamente nada (ni alertas en vivo ni resúmenes), sin pausar la evaluación interna de la estrategia. |
 | `TIPMINER_BASE_URL` | Base de la API pública de Tipminer. Trae un valor por defecto. |
 | `TIPMINER_PROVIDER_ID` | uuid de la mesa Bac Bo en Tipminer. Trae un valor por defecto. |
 | `TIPMINER_TIMEZONE` | Timezone usada al pedir el historial. Opcional. |

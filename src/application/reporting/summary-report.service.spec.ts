@@ -101,70 +101,50 @@ describe('SummaryReportService', () => {
     expect(store.getClosedBetween).not.toHaveBeenCalled();
   });
 
-  it('returns the calculated summary metrics', () => {
+  it('returns independent oficial/pruebas metrics, filtered by strategy group', () => {
     store.getAllOpened.mockReturnValue([
-      { operationId: 'op-1', openedAt: new Date('2026-08-01T15:00:00.000Z') },
+      {
+        operationId: 'op-1',
+        strategyId: 'streak-3',
+        openedAt: new Date('2026-08-01T15:00:00.000Z'),
+      },
+      {
+        operationId: 'op-2',
+        strategyId: 'streak-4',
+        openedAt: new Date('2026-08-01T15:00:00.000Z'),
+      },
     ]);
     store.getAllClosed.mockReturnValue([
       {
         operationId: 'op-1',
+        strategyId: 'streak-3',
         openedAt: new Date('2026-08-01T15:00:00.000Z'),
         closedAt: new Date('2026-08-01T15:05:00.000Z'),
         result: OperationState.WON,
         martingalesUsed: 0,
         maxMartingales: 2,
       },
+      {
+        operationId: 'op-2',
+        strategyId: 'streak-4',
+        openedAt: new Date('2026-08-01T15:00:00.000Z'),
+        closedAt: new Date('2026-08-01T15:05:00.000Z'),
+        result: OperationState.LOST,
+        martingalesUsed: 2,
+        maxMartingales: 2,
+      },
     ]);
     const service = build([]);
 
-    const metrics = service.generateAndDispatch();
+    const result = service.generateAndDispatch();
 
-    expect(metrics.alertsSent).toBe(1);
-    expect(metrics.won).toBe(1);
-    expect(metrics.directWins).toBe(1);
+    expect(result.oficial.alertsSent).toBe(1);
+    expect(result.oficial.won).toBe(1);
+    expect(result.pruebas.alertsSent).toBe(1);
+    expect(result.pruebas.lost).toBe(1);
   });
 
-  it('dispatches a Notification built via createForSummaryReport to every enabled channel', () => {
-    const telegram = buildChannel();
-    const other = buildChannel();
-    const service = build([telegram, other]);
-
-    service.generateAndDispatch();
-
-    expect(notificationFactory.createForSummaryReport).toHaveBeenCalledWith(
-      expect.objectContaining({ alertsSent: 0 }),
-      expect.any(Date),
-      NotificationChannelType.TELEGRAM,
-    );
-    expect(telegram.send).toHaveBeenCalledTimes(1);
-    expect(other.send).toHaveBeenCalledTimes(1);
-  });
-
-  it('skips a disabled channel', () => {
-    const channel = buildChannel({ enabled: jest.fn().mockReturnValue(false) });
-    const service = build([channel]);
-
-    service.generateAndDispatch();
-
-    expect(channel.send).not.toHaveBeenCalled();
-  });
-
-  it('ignores supports() and sends to every enabled channel by default ("todos")', () => {
-    const official = buildChannel({
-      supports: jest.fn().mockReturnValue(false),
-    });
-    const test = buildTestChannel({
-      supports: jest.fn().mockReturnValue(false),
-    });
-    const service = build([official, test]);
-
-    service.generateAndDispatch();
-
-    expect(official.send).toHaveBeenCalledTimes(1);
-    expect(test.send).toHaveBeenCalledTimes(1);
-  });
-
-  it('sends only to the official channel when selector is "oficial"', () => {
+  it('sends only to the official channel, with only the official metrics, when selector is "oficial"', () => {
     const official = buildChannel();
     const test = buildTestChannel();
     const service = build([official, test]);
@@ -173,9 +153,10 @@ describe('SummaryReportService', () => {
 
     expect(official.send).toHaveBeenCalledTimes(1);
     expect(test.send).not.toHaveBeenCalled();
+    expect(notificationFactory.createForSummaryReport).toHaveBeenCalledTimes(1);
   });
 
-  it('sends only to the test channel when selector is "pruebas"', () => {
+  it('sends only to the test channel, with only the test metrics, when selector is "pruebas"', () => {
     const official = buildChannel();
     const test = buildTestChannel();
     const service = build([official, test]);
@@ -186,9 +167,55 @@ describe('SummaryReportService', () => {
     expect(test.send).toHaveBeenCalledTimes(1);
   });
 
-  it('sends to both channels when selector is "todos"', () => {
+  it('sends two independent messages (one per channel, each with its own metrics) when selector is "todos"', () => {
+    store.getAllOpened.mockReturnValue([
+      {
+        operationId: 'op-1',
+        strategyId: 'streak-3',
+        openedAt: new Date('2026-08-01T15:00:00.000Z'),
+      },
+      {
+        operationId: 'op-2',
+        strategyId: 'streak-4',
+        openedAt: new Date('2026-08-01T15:00:00.000Z'),
+      },
+    ]);
     const official = buildChannel();
     const test = buildTestChannel();
+    const service = build([official, test]);
+
+    service.generateAndDispatch('todos');
+
+    expect(official.send).toHaveBeenCalledTimes(1);
+    expect(test.send).toHaveBeenCalledTimes(1);
+    expect(notificationFactory.createForSummaryReport).toHaveBeenCalledWith(
+      expect.objectContaining({ alertsSent: 1 }),
+      expect.any(Date),
+      NotificationChannelType.TELEGRAM,
+    );
+    expect(notificationFactory.createForSummaryReport).toHaveBeenCalledWith(
+      expect.objectContaining({ alertsSent: 1 }),
+      expect.any(Date),
+      NotificationChannelType.TELEGRAM_PRUEBAS,
+    );
+  });
+
+  it('skips a disabled channel', () => {
+    const channel = buildChannel({ enabled: jest.fn().mockReturnValue(false) });
+    const service = build([channel]);
+
+    service.generateAndDispatch('oficial');
+
+    expect(channel.send).not.toHaveBeenCalled();
+  });
+
+  it('ignores supports() and sends to the channel of its own group regardless of it', () => {
+    const official = buildChannel({
+      supports: jest.fn().mockReturnValue(false),
+    });
+    const test = buildTestChannel({
+      supports: jest.fn().mockReturnValue(false),
+    });
     const service = build([official, test]);
 
     service.generateAndDispatch('todos');

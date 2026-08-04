@@ -12,27 +12,16 @@ import {
   TelegramChannel,
   TelegramChannelConfig,
 } from '../../infrastructure/telegram/telegram.channel';
+import { resolveStrategyGroup } from '../../core/strategy/strategy-group';
 import { DomainEventBusModule } from '../domain-events/domain-event-bus.module';
 import { DistributionMetricModule } from '../metrics/distribution-metric.module';
 import { ErrorTrackingModule } from '../observability/error-tracking.module';
 import { NotificationCoordinator } from './notification.coordinator';
 import { MessageTracker } from './message-tracker';
 
-/**
- * Estrategias cuyas señales son solo para probar en paralelo a producción:
- * sus notificaciones nunca deben llegar al canal oficial, solo al de
- * pruebas. Único lugar a tocar si mañana se agrega otra estrategia "de
- * pruebas" (ver Streak4Strategy).
- */
-const TEST_ONLY_STRATEGY_IDS: ReadonlySet<string> = new Set(['streak-4']);
-
 /** Tokens privados de este módulo: solo unen la config con su canal. */
 const TELEGRAM_OFFICIAL_CONFIG = Symbol('TelegramOfficialConfig');
 const TELEGRAM_TEST_CONFIG = Symbol('TelegramTestConfig');
-
-function isTestOnlyStrategy(strategyId: string | undefined): boolean {
-  return strategyId !== undefined && TEST_ONLY_STRATEGY_IDS.has(strategyId);
-}
 
 /**
  * TelegramChannel es una clase parametrizable (ver su config), no un
@@ -48,7 +37,8 @@ const officialTelegramConfigProvider: Provider = {
     channelType: NotificationChannelType.TELEGRAM,
     botToken: configService.get<string>('telegram.botToken'),
     chatId: configService.get<string>('telegram.chatId'),
-    isStrategyAllowed: (strategyId) => !isTestOnlyStrategy(strategyId),
+    isStrategyAllowed: (strategyId) =>
+      resolveStrategyGroup(strategyId) === 'oficial',
   }),
   inject: [ConfigService],
 };
@@ -60,7 +50,12 @@ const testTelegramConfigProvider: Provider = {
     channelType: NotificationChannelType.TELEGRAM_PRUEBAS,
     botToken: configService.get<string>('telegram.pruebas.botToken'),
     chatId: configService.get<string>('telegram.pruebas.chatId'),
-    isStrategyAllowed: (strategyId) => isTestOnlyStrategy(strategyId),
+    isStrategyAllowed: (strategyId) =>
+      resolveStrategyGroup(strategyId) === 'pruebas',
+    // TELEGRAM_PRUEBAS_ENABLED: interruptor independiente de tener
+    // token/chatId configurados (ver TelegramChannel.enabled()).
+    enabledWhen: () =>
+      configService.get<boolean>('telegram.pruebas.enabled') ?? true,
   }),
   inject: [ConfigService],
 };

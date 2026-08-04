@@ -300,6 +300,19 @@ describe('NotificationFactory', () => {
       expect(notification.title).toContain('Reporte Horario');
       expect(notification.title).toContain('13:00');
       expect(notification.title).toContain('14:00');
+      expect(notification.title).toContain('Oficial');
+    });
+
+    it('labels the title as "Pruebas" when built for the test channel', () => {
+      const report = buildReportSnapshot();
+
+      const notification = factory.createForHourlyReport(
+        report,
+        NotificationChannelType.TELEGRAM_PRUEBAS,
+      );
+
+      expect(notification.title).toContain('Pruebas');
+      expect(notification.title).not.toContain('Oficial');
     });
 
     it('includes the quick-glance metrics in the message', () => {
@@ -375,6 +388,20 @@ describe('NotificationFactory', () => {
       expect(notification.severity).toBe(NotificationSeverity.INFO);
       expect(notification.channel).toBe(NotificationChannelType.TELEGRAM);
       expect(notification.title).toContain('Resumen Completo del Sistema');
+      expect(notification.title).toContain('Oficial');
+    });
+
+    it('labels the title as "Pruebas" when built for the test channel', () => {
+      const metrics = buildSummaryMetrics();
+
+      const notification = factory.createForSummaryReport(
+        metrics,
+        new Date('2026-08-01T21:15:03.000Z'),
+        NotificationChannelType.TELEGRAM_PRUEBAS,
+      );
+
+      expect(notification.title).toContain('Pruebas');
+      expect(notification.title).not.toContain('Oficial');
     });
 
     it('includes the general info section', () => {

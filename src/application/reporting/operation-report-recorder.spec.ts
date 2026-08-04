@@ -94,6 +94,7 @@ describe('OperationReportRecorder', () => {
 
     expect(store.recordOpened).toHaveBeenCalledWith({
       operationId: 'op-42',
+      strategyId: snapshot.strategyId,
       openedAt: snapshot.openedAt,
     });
   });
@@ -110,6 +111,7 @@ describe('OperationReportRecorder', () => {
 
     expect(store.recordClosed).toHaveBeenCalledWith({
       operationId: 'op-1',
+      strategyId: snapshot.strategyId,
       openedAt: snapshot.openedAt,
       closedAt: snapshot.closedAt,
       result: OperationState.WON,
@@ -130,6 +132,7 @@ describe('OperationReportRecorder', () => {
 
     expect(store.recordClosed).toHaveBeenCalledWith({
       operationId: 'op-2',
+      strategyId: snapshot.strategyId,
       openedAt: snapshot.openedAt,
       closedAt: snapshot.closedAt,
       result: OperationState.LOST,

@@ -61,6 +61,17 @@ function buildChannel(
   };
 }
 
+function buildTestChannel(
+  overrides: Partial<NotificationChannel> = {},
+): jest.Mocked<NotificationChannel> {
+  return buildChannel({
+    getChannelType: jest
+      .fn()
+      .mockReturnValue(NotificationChannelType.TELEGRAM_PRUEBAS),
+    ...overrides,
+  });
+}
+
 describe('ReportNotificationCoordinator', () => {
   let domainEventBus: jest.Mocked<DomainEventBus>;
   let notificationFactory: jest.Mocked<
@@ -169,7 +180,7 @@ describe('ReportNotificationCoordinator', () => {
     expect(channel.send).not.toHaveBeenCalled();
   });
 
-  it('dispatches independently to every registered channel', () => {
+  it('dispatches independently to every registered official channel', () => {
     const telegram = buildChannel();
     const other = buildChannel();
     const coordinator = build([telegram, other]);
@@ -182,5 +193,20 @@ describe('ReportNotificationCoordinator', () => {
 
     expect(telegram.send).toHaveBeenCalledTimes(1);
     expect(other.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('never dispatches the hourly report to the test channel, even if enabled and it would support it', () => {
+    const official = buildChannel();
+    const test = buildTestChannel();
+    const coordinator = build([official, test]);
+
+    dispatchEvent(
+      coordinator,
+      HourlyReportGeneratedEvent.eventName,
+      buildReport(),
+    );
+
+    expect(official.send).toHaveBeenCalledTimes(1);
+    expect(test.send).not.toHaveBeenCalled();
   });
 });

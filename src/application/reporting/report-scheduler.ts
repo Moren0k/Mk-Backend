@@ -12,6 +12,7 @@ import {
 } from '../../core/constants/injection-tokens.constants';
 import { HourlyReportGeneratedEvent } from '../../core/domain-events/reporting/hourly-report-generated.event';
 import type { DomainEventBus } from '../../core/domain-events/base/domain-event-bus.interface';
+import { filterByStrategyGroup } from '../../core/reporting/report-group-filter';
 import { calculateReportMetrics } from '../../core/reporting/report-metrics.calculator';
 import {
   getNextHourBoundary,
@@ -77,9 +78,22 @@ export class ReportScheduler implements OnModuleInit, OnModuleDestroy {
     this.publishReport(hourStart, hourEnd);
   }
 
+  /**
+   * El reporte horario automático es exclusivamente del grupo oficial: se
+   * filtran los registros de estrategias de pruebas (streak-4) antes de
+   * calcular las métricas, para que nunca contaminen el reporte que le
+   * llega al chat oficial (ver ReportNotificationCoordinator, que además
+   * dirige el envío únicamente a ese canal).
+   */
   private publishReport(from: Date, to: Date): void {
-    const opened = this.store.getOpenedBetween(from, to);
-    const closed = this.store.getClosedBetween(from, to);
+    const opened = filterByStrategyGroup(
+      this.store.getOpenedBetween(from, to),
+      'oficial',
+    );
+    const closed = filterByStrategyGroup(
+      this.store.getClosedBetween(from, to),
+      'oficial',
+    );
     const metrics = calculateReportMetrics(opened, closed);
 
     const snapshot: ReportSnapshot = Object.freeze({

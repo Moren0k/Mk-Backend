@@ -22,6 +22,12 @@ export default () => ({
     pruebas: {
       botToken: process.env.TELEGRAM_PRUEBAS_BOT_TOKEN,
       chatId: process.env.TELEGRAM_PRUEBAS_CHAT_ID,
+      // Interruptor de modo pruebas: en "false" el canal de pruebas no
+      // envía absolutamente nada (ni alertas en vivo de streak-4 ni el
+      // resumen manual/horario), sin afectar la evaluación interna de la
+      // estrategia. Default true (habilitado) si no está definida, para no
+      // romper el comportamiento actual en despliegues existentes.
+      enabled: process.env.TELEGRAM_PRUEBAS_ENABLED !== 'false',
     },
   },
   tipminer: {

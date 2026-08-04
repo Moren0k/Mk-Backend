@@ -83,6 +83,26 @@ describe('TelegramChannel', () => {
     ).toBe(false);
   });
 
+  it('is enabled without enabledWhen configured (defaults to true)', () => {
+    expect(new TelegramChannel(buildConfig()).enabled()).toBe(true);
+  });
+
+  it('is disabled when enabledWhen returns false, even with valid token/chatId', () => {
+    const channel = new TelegramChannel(
+      buildConfig({ enabledWhen: () => false }),
+    );
+
+    expect(channel.enabled()).toBe(false);
+  });
+
+  it('stays disabled when token/chatId are missing, even if enabledWhen returns true', () => {
+    const channel = new TelegramChannel(
+      buildConfig({ botToken: undefined, enabledWhen: () => true }),
+    );
+
+    expect(channel.enabled()).toBe(false);
+  });
+
   it('supports a notification only when isStrategyAllowed says so', () => {
     const channel = new TelegramChannel(
       buildConfig({ isStrategyAllowed: (id) => id === 'streak-3' }),

@@ -5,6 +5,7 @@ import { NotificationChannelType } from '../../core/enums/notification-channel-t
 import { NotificationSeverity } from '../../core/enums/notification-severity.enum';
 import { createNotification } from '../../core/notification/notification.type';
 import { EngineErrorTracker } from '../../core/observability/engine-error-tracker';
+import { resolveStrategyGroup } from '../../core/strategy/strategy-group';
 import { TelegramChannel } from '../../infrastructure/telegram/telegram.channel';
 import { NotificationChannelDispatcher } from './notification-channel-dispatcher';
 
@@ -14,30 +15,35 @@ import { NotificationChannelDispatcher } from './notification-channel-dispatcher
  * streak-4) debe llegar exclusivamente al canal de pruebas; cualquier otra
  * estrategia (o ninguna, como los reportes) debe llegar exclusivamente al
  * canal oficial. Usa instancias reales de TelegramChannel, configuradas
- * igual que en NotificationModule, en vez de dobles genéricos.
+ * igual que en NotificationModule (mismo `resolveStrategyGroup` de
+ * `core/strategy`, no una copia local), en vez de dobles genéricos.
  */
 describe('Telegram official/test channel routing', () => {
-  const TEST_ONLY_STRATEGY_IDS = new Set(['streak-4']);
-
-  function buildOfficialChannel(): TelegramChannel {
+  function buildOfficialChannel(
+    overrides: { enabledWhen?: () => boolean } = {},
+  ): TelegramChannel {
     return new TelegramChannel({
       label: 'Oficial',
       channelType: NotificationChannelType.TELEGRAM,
       botToken: 'official-token',
       chatId: 'official-chat',
       isStrategyAllowed: (strategyId) =>
-        strategyId === undefined || !TEST_ONLY_STRATEGY_IDS.has(strategyId),
+        resolveStrategyGroup(strategyId) === 'oficial',
+      ...overrides,
     });
   }
 
-  function buildTestChannel(): TelegramChannel {
+  function buildTestChannel(
+    overrides: { enabledWhen?: () => boolean } = {},
+  ): TelegramChannel {
     return new TelegramChannel({
       label: 'Pruebas',
       channelType: NotificationChannelType.TELEGRAM_PRUEBAS,
       botToken: 'test-token',
       chatId: 'test-chat',
       isStrategyAllowed: (strategyId) =>
-        strategyId !== undefined && TEST_ONLY_STRATEGY_IDS.has(strategyId),
+        resolveStrategyGroup(strategyId) === 'pruebas',
+      ...overrides,
     });
   }
 
@@ -128,6 +134,22 @@ describe('Telegram official/test channel routing', () => {
     dispatchWithStrategy(official, test, undefined);
 
     expect(officialSend).toHaveBeenCalledTimes(1);
+    expect(testSend).not.toHaveBeenCalled();
+  });
+
+  it('routes nothing to the test channel when TELEGRAM_PRUEBAS_ENABLED is false, regardless of strategy', () => {
+    const official = buildOfficialChannel();
+    const test = buildTestChannel({ enabledWhen: () => false });
+    const officialSend = jest
+      .spyOn(official, 'send')
+      .mockResolvedValue({ delivered: true, messageId: 1 });
+    const testSend = jest
+      .spyOn(test, 'send')
+      .mockResolvedValue({ delivered: true, messageId: 1 });
+
+    dispatchWithStrategy(official, test, 'streak-4');
+
+    expect(officialSend).not.toHaveBeenCalled();
     expect(testSend).not.toHaveBeenCalled();
   });
 

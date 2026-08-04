@@ -6,14 +6,16 @@ import {
   OPERATION_REPORT_STORE,
 } from '../../core/constants/injection-tokens.constants';
 import type { DomainEventBus } from '../../core/domain-events/base/domain-event-bus.interface';
-import { NotificationChannelType } from '../../core/enums/notification-channel-type.enum';
 import type { NotificationChannel } from '../../core/interfaces/notification-channel.interface';
 import { NotificationFactory } from '../../core/notification/notification.factory';
 import { EngineErrorTracker } from '../../core/observability/engine-error-tracker';
 import type { OperationReportStore } from '../../core/reporting/interfaces/operation-report-store.interface';
+import { filterByStrategyGroup } from '../../core/reporting/report-group-filter';
 import { calculateSummaryMetrics } from '../../core/reporting/summary-metrics.calculator';
-import { SummaryMetricsSnapshot } from '../../core/reporting/types/summary-metrics-snapshot.type';
+import { SummaryReportResult } from '../../core/reporting/types/summary-report-result.type';
+import { StrategyGroup } from '../../core/strategy/strategy-group';
 import { NotificationChannelDispatcher } from '../notification/notification-channel-dispatcher';
+import { selectChannelsByGroup } from '../notification/notification-channel-selector';
 
 /**
  * A qué destino(s) enviar el resumen, elegido explícitamente por quien pide
@@ -22,6 +24,14 @@ import { NotificationChannelDispatcher } from '../notification/notification-chan
  * destino no se decide por `channel.supports()` sino por este selector.
  */
 export type SummaryReportChannelSelector = 'oficial' | 'pruebas' | 'todos';
+
+const GROUPS_BY_SELECTOR: Readonly<
+  Record<SummaryReportChannelSelector, readonly StrategyGroup[]>
+> = {
+  oficial: ['oficial'],
+  pruebas: ['pruebas'],
+  todos: ['oficial', 'pruebas'],
+};
 
 /**
  * Genera y despacha el resumen completo del historial en memoria
@@ -33,6 +43,12 @@ export type SummaryReportChannelSelector = 'oficial' | 'pruebas' | 'todos';
  * construye su propio NotificationChannelDispatcher (mismo patrón que
  * ambos) para no acoplar el flujo bajo demanda al flujo automático del
  * reporte horario.
+ *
+ * Oficial y pruebas nunca comparten un mismo mensaje: se calculan dos
+ * SummaryMetricsSnapshot independientes (filtrando los registros por
+ * grupo antes de calcular) y cada uno se despacha únicamente al chat que le
+ * corresponde, incluso cuando el selector es "todos" (dos mensajes
+ * distintos, uno por chat, nunca uno combinado).
  */
 @Injectable()
 export class SummaryReportService {
@@ -57,53 +73,38 @@ export class SummaryReportService {
 
   generateAndDispatch(
     channelSelector: SummaryReportChannelSelector = 'todos',
-  ): SummaryMetricsSnapshot {
+  ): SummaryReportResult {
     const now = new Date();
     const opened = this.store.getAllOpened();
     const closed = this.store.getAllClosed();
-    const metrics = calculateSummaryMetrics(
-      opened,
-      closed,
-      this.processStartedAt,
-      now,
-    );
 
-    this.channelDispatcher.dispatchTo(
-      this.selectChannels(channelSelector),
-      (channelType) =>
-        this.notificationFactory.createForSummaryReport(
-          metrics,
-          now,
-          channelType,
-        ),
-    );
+    const result: SummaryReportResult = {
+      oficial: calculateSummaryMetrics(
+        filterByStrategyGroup(opened, 'oficial'),
+        filterByStrategyGroup(closed, 'oficial'),
+        this.processStartedAt,
+        now,
+      ),
+      pruebas: calculateSummaryMetrics(
+        filterByStrategyGroup(opened, 'pruebas'),
+        filterByStrategyGroup(closed, 'pruebas'),
+        this.processStartedAt,
+        now,
+      ),
+    };
 
-    return metrics;
-  }
-
-  /**
-   * El selector elige por destino de negocio ("oficial"/"pruebas"/"todos"),
-   * no por instancia concreta: se resuelve mirando `getChannelType()` de
-   * cada canal registrado, igual que ya distingue MessageTracker al borrar
-   * mensajes (ver TelegramChannelConfig.channelType).
-   */
-  private selectChannels(
-    selector: SummaryReportChannelSelector,
-  ): readonly NotificationChannel[] {
-    switch (selector) {
-      case 'oficial':
-        return this.channels.filter(
-          (channel) =>
-            channel.getChannelType() === NotificationChannelType.TELEGRAM,
-        );
-      case 'pruebas':
-        return this.channels.filter(
-          (channel) =>
-            channel.getChannelType() ===
-            NotificationChannelType.TELEGRAM_PRUEBAS,
-        );
-      case 'todos':
-        return this.channels;
+    for (const group of GROUPS_BY_SELECTOR[channelSelector]) {
+      this.channelDispatcher.dispatchTo(
+        selectChannelsByGroup(this.channels, group),
+        (channelType) =>
+          this.notificationFactory.createForSummaryReport(
+            result[group],
+            now,
+            channelType,
+          ),
+      );
     }
+
+    return result;
   }
 }

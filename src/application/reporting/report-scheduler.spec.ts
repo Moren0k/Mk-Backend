@@ -75,12 +75,21 @@ describe('ReportScheduler', () => {
 
   it('builds the report window (Bogotá 10:00-11:00) and its metrics from the store', () => {
     store.getOpenedBetween.mockReturnValue([
-      { operationId: 'op-1', openedAt: new Date('2026-08-01T15:10:00.000Z') },
-      { operationId: 'op-2', openedAt: new Date('2026-08-01T15:20:00.000Z') },
+      {
+        operationId: 'op-1',
+        strategyId: 'streak-3',
+        openedAt: new Date('2026-08-01T15:10:00.000Z'),
+      },
+      {
+        operationId: 'op-2',
+        strategyId: 'streak-3',
+        openedAt: new Date('2026-08-01T15:20:00.000Z'),
+      },
     ]);
     store.getClosedBetween.mockReturnValue([
       {
         operationId: 'op-1',
+        strategyId: 'streak-3',
         openedAt: new Date('2026-08-01T15:10:00.000Z'),
         closedAt: new Date('2026-08-01T15:15:00.000Z'),
         result: OperationState.WON,
@@ -108,6 +117,43 @@ describe('ReportScheduler', () => {
     expect(report.metrics.closedOperations).toBe(1);
     expect(report.metrics.won).toBe(1);
     expect(report.metrics.directWins).toBe(1);
+  });
+
+  it('excludes streak-4 (test-only) records from the hourly report metrics', () => {
+    store.getOpenedBetween.mockReturnValue([
+      {
+        operationId: 'op-1',
+        strategyId: 'streak-3',
+        openedAt: new Date('2026-08-01T15:10:00.000Z'),
+      },
+      {
+        operationId: 'op-2',
+        strategyId: 'streak-4',
+        openedAt: new Date('2026-08-01T15:20:00.000Z'),
+      },
+    ]);
+    store.getClosedBetween.mockReturnValue([
+      {
+        operationId: 'op-2',
+        strategyId: 'streak-4',
+        openedAt: new Date('2026-08-01T15:20:00.000Z'),
+        closedAt: new Date('2026-08-01T15:25:00.000Z'),
+        result: OperationState.WON,
+        martingalesUsed: 0,
+        maxMartingales: 2,
+      },
+    ]);
+
+    start('2026-08-01T15:30:00.000Z');
+    jest.advanceTimersByTime(30 * 60 * 1000);
+
+    const [event] = domainEventBus.publish.mock.calls[0] as [
+      HourlyReportGeneratedEvent,
+    ];
+    const report = event.payload;
+
+    expect(report.metrics.alertsSent).toBe(1);
+    expect(report.metrics.closedOperations).toBe(0);
   });
 
   it('reschedules itself for the following hour after firing', () => {

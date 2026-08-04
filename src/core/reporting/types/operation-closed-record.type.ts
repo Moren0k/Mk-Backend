@@ -9,6 +9,7 @@ import { OperationState } from '../../enums/operation-state.enum';
  */
 export type OperationClosedRecord = {
   readonly operationId: string;
+  readonly strategyId: string;
   readonly openedAt: Date;
   readonly closedAt: Date;
   readonly result: OperationState.WON | OperationState.LOST;

@@ -26,6 +26,19 @@ function formatTime(date: Date): string {
   return `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
 }
 
+/**
+ * Usado por createForHourlyReport/createForSummaryReport para que el título
+ * deje explícito a qué grupo pertenece el reporte (oficial o pruebas): con
+ * los datos ya separados por grupo (ver SummaryReportService/ReportScheduler),
+ * quien lea el chat debe poder confirmarlo de un vistazo, sin adivinar por
+ * el chat en el que llegó.
+ */
+function formatGroupSuffix(channel: NotificationChannelType): string {
+  return channel === NotificationChannelType.TELEGRAM_PRUEBAS
+    ? ' · Pruebas'
+    : ' · Oficial';
+}
+
 export class NotificationFactory {
   createForOperationOpened(
     snapshot: OperationSnapshot,
@@ -186,7 +199,7 @@ export class NotificationFactory {
     return createNotification({
       channel,
       severity: NotificationSeverity.INFO,
-      title: `📊 Reporte Horario · ${from} - ${to} (COL)`,
+      title: `📊 Reporte Horario · ${from} - ${to} (COL)${formatGroupSuffix(channel)}`,
       message: this.buildReportMessage(report.metrics),
       metadata: {},
     });
@@ -208,7 +221,7 @@ export class NotificationFactory {
     return createNotification({
       channel,
       severity: NotificationSeverity.INFO,
-      title: `🧭 Resumen Completo del Sistema · ${formatTime(generatedAt)}`,
+      title: `🧭 Resumen Completo del Sistema · ${formatTime(generatedAt)}${formatGroupSuffix(channel)}`,
       message: this.buildSummaryMessage(metrics),
       metadata: {},
     });

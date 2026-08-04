@@ -12,7 +12,10 @@ function buildConfigService(password: string | undefined): ConfigService {
 
 function buildSummaryReportService(): jest.Mocked<SummaryReportService> {
   return {
-    generateAndDispatch: jest.fn().mockReturnValue({ alertsSent: 42 }),
+    generateAndDispatch: jest.fn().mockReturnValue({
+      oficial: { alertsSent: 42 },
+      pruebas: { alertsSent: 7 },
+    }),
   } as unknown as jest.Mocked<SummaryReportService>;
 }
 
@@ -77,7 +80,10 @@ describe('AdminController', () => {
       expect.objectContaining({
         ok: true,
         command: 'RESUMEN',
-        metrics: { alertsSent: 42 },
+        metrics: {
+          oficial: { alertsSent: 42 },
+          pruebas: { alertsSent: 7 },
+        },
       }),
     );
   });
