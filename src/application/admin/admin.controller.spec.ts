@@ -81,4 +81,43 @@ describe('AdminController', () => {
       }),
     );
   });
+
+  it('defaults channel to "todos" when the request omits it', () => {
+    const result = controller.handleCommand({
+      password: REAL_PASSWORD,
+      command: 'RESUMEN',
+    });
+
+    expect(summaryReportService.generateAndDispatch).toHaveBeenCalledWith(
+      'todos',
+    );
+    expect(result).toEqual(expect.objectContaining({ channel: 'todos' }));
+  });
+
+  it.each(['oficial', 'pruebas', 'todos'])(
+    'forwards channel "%s" to generateAndDispatch and echoes it back',
+    (channel) => {
+      const result = controller.handleCommand({
+        password: REAL_PASSWORD,
+        command: 'RESUMEN',
+        channel,
+      });
+
+      expect(summaryReportService.generateAndDispatch).toHaveBeenCalledWith(
+        channel,
+      );
+      expect(result).toEqual(expect.objectContaining({ channel }));
+    },
+  );
+
+  it('throws BadRequest for an unsupported channel, even with a valid command', () => {
+    expect(() =>
+      controller.handleCommand({
+        password: REAL_PASSWORD,
+        command: 'RESUMEN',
+        channel: 'discord',
+      }),
+    ).toThrow(BadRequestException);
+    expect(summaryReportService.generateAndDispatch).not.toHaveBeenCalled();
+  });
 });

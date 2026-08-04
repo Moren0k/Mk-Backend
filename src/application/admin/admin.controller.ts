@@ -12,8 +12,12 @@ import { ConfigService } from '@nestjs/config';
 
 import { SummaryReportService } from '../reporting/summary-report.service';
 import { hashPassword } from './admin-password';
-import { AdminCommand } from './admin-command.type';
+import { AdminCommand, AdminNotificationChannel } from './admin-command.type';
 import type { AdminCommandRequest } from './admin-command.type';
+
+const SUPPORTED_CHANNELS: ReadonlySet<string> = new Set(
+  Object.values(AdminNotificationChannel),
+);
 
 /**
  * Único punto HTTP administrativo del sistema: pensado para uso interno,
@@ -45,14 +49,33 @@ export class AdminController {
       throw new BadRequestException('Comando no soportado.');
     }
 
-    const metrics = this.summaryReportService.generateAndDispatch();
+    const channel = this.parseChannel(body?.channel);
+    const metrics = this.summaryReportService.generateAndDispatch(channel);
 
     return {
       ok: true,
       command: AdminCommand.RESUMEN,
+      channel,
       dispatchedAt: new Date().toISOString(),
       metrics,
     };
+  }
+
+  /** Default "todos" si el cliente no manda `channel`, para no romper a quien ya integró el endpoint. */
+  private parseChannel(
+    candidate: string | undefined,
+  ): AdminNotificationChannel {
+    if (candidate === undefined) {
+      return AdminNotificationChannel.TODOS;
+    }
+
+    if (!SUPPORTED_CHANNELS.has(candidate)) {
+      throw new BadRequestException(
+        `Canal no soportado. Usa "${AdminNotificationChannel.OFICIAL}", "${AdminNotificationChannel.PRUEBAS}" o "${AdminNotificationChannel.TODOS}".`,
+      );
+    }
+
+    return candidate as AdminNotificationChannel;
   }
 
   /**

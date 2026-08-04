@@ -34,6 +34,17 @@ function buildChannel(
   };
 }
 
+function buildTestChannel(
+  overrides: Partial<NotificationChannel> = {},
+): jest.Mocked<NotificationChannel> {
+  return buildChannel({
+    getChannelType: jest
+      .fn()
+      .mockReturnValue(NotificationChannelType.TELEGRAM_PRUEBAS),
+    ...overrides,
+  });
+}
+
 describe('SummaryReportService', () => {
   let domainEventBus: jest.Mocked<DomainEventBus>;
   let store: jest.Mocked<OperationReportStore>;
@@ -136,5 +147,53 @@ describe('SummaryReportService', () => {
     service.generateAndDispatch();
 
     expect(channel.send).not.toHaveBeenCalled();
+  });
+
+  it('ignores supports() and sends to every enabled channel by default ("todos")', () => {
+    const official = buildChannel({
+      supports: jest.fn().mockReturnValue(false),
+    });
+    const test = buildTestChannel({
+      supports: jest.fn().mockReturnValue(false),
+    });
+    const service = build([official, test]);
+
+    service.generateAndDispatch();
+
+    expect(official.send).toHaveBeenCalledTimes(1);
+    expect(test.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends only to the official channel when selector is "oficial"', () => {
+    const official = buildChannel();
+    const test = buildTestChannel();
+    const service = build([official, test]);
+
+    service.generateAndDispatch('oficial');
+
+    expect(official.send).toHaveBeenCalledTimes(1);
+    expect(test.send).not.toHaveBeenCalled();
+  });
+
+  it('sends only to the test channel when selector is "pruebas"', () => {
+    const official = buildChannel();
+    const test = buildTestChannel();
+    const service = build([official, test]);
+
+    service.generateAndDispatch('pruebas');
+
+    expect(official.send).not.toHaveBeenCalled();
+    expect(test.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends to both channels when selector is "todos"', () => {
+    const official = buildChannel();
+    const test = buildTestChannel();
+    const service = build([official, test]);
+
+    service.generateAndDispatch('todos');
+
+    expect(official.send).toHaveBeenCalledTimes(1);
+    expect(test.send).toHaveBeenCalledTimes(1);
   });
 });
