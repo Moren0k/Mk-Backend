@@ -57,8 +57,8 @@ describe('Streak3Strategy', () => {
     strategy = new Streak3Strategy();
   });
 
-  it('is enabled by default', () => {
-    expect(strategy.enabled()).toBe(true);
+  it('is disabled (replaced by Streak4Strategy on the official channel)', () => {
+    expect(strategy.enabled()).toBe(false);
   });
 
   it('recommends BANKER after three consecutive PLAYER wins', () => {

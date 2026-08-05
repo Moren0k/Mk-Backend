@@ -18,6 +18,7 @@ function buildReport(overrides: Partial<ReportSnapshot> = {}): ReportSnapshot {
   return {
     windowFrom: new Date('2026-08-01T15:00:00.000Z'),
     windowTo: new Date('2026-08-01T16:00:00.000Z'),
+    group: 'oficial',
     metrics: {
       alertsSent: 1,
       closedOperations: 1,
@@ -195,7 +196,7 @@ describe('ReportNotificationCoordinator', () => {
     expect(other.send).toHaveBeenCalledTimes(1);
   });
 
-  it('never dispatches the hourly report to the test channel, even if enabled and it would support it', () => {
+  it('routes a report with group "oficial" only to the official channel', () => {
     const official = buildChannel();
     const test = buildTestChannel();
     const coordinator = build([official, test]);
@@ -203,10 +204,25 @@ describe('ReportNotificationCoordinator', () => {
     dispatchEvent(
       coordinator,
       HourlyReportGeneratedEvent.eventName,
-      buildReport(),
+      buildReport({ group: 'oficial' }),
     );
 
     expect(official.send).toHaveBeenCalledTimes(1);
     expect(test.send).not.toHaveBeenCalled();
+  });
+
+  it('routes a report with group "pruebas" only to the test channel', () => {
+    const official = buildChannel();
+    const test = buildTestChannel();
+    const coordinator = build([official, test]);
+
+    dispatchEvent(
+      coordinator,
+      HourlyReportGeneratedEvent.eventName,
+      buildReport({ group: 'pruebas' }),
+    );
+
+    expect(test.send).toHaveBeenCalledTimes(1);
+    expect(official.send).not.toHaveBeenCalled();
   });
 });

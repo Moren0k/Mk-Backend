@@ -9,8 +9,8 @@ import type { DomainEventBus } from '../../core/domain-events/base/domain-event-
 import type { NotificationChannel } from '../../core/interfaces/notification-channel.interface';
 import { NotificationFactory } from '../../core/notification/notification.factory';
 import { EngineErrorTracker } from '../../core/observability/engine-error-tracker';
+import { buildGroupMetrics } from '../../core/reporting/build-group-metrics';
 import type { OperationReportStore } from '../../core/reporting/interfaces/operation-report-store.interface';
-import { filterByStrategyGroup } from '../../core/reporting/report-group-filter';
 import { calculateSummaryMetrics } from '../../core/reporting/summary-metrics.calculator';
 import { SummaryReportResult } from '../../core/reporting/types/summary-report-result.type';
 import { StrategyGroup } from '../../core/strategy/strategy-group';
@@ -79,17 +79,11 @@ export class SummaryReportService {
     const closed = this.store.getAllClosed();
 
     const result: SummaryReportResult = {
-      oficial: calculateSummaryMetrics(
-        filterByStrategyGroup(opened, 'oficial'),
-        filterByStrategyGroup(closed, 'oficial'),
-        this.processStartedAt,
-        now,
+      oficial: buildGroupMetrics(opened, closed, 'oficial', (o, c) =>
+        calculateSummaryMetrics(o, c, this.processStartedAt, now),
       ),
-      pruebas: calculateSummaryMetrics(
-        filterByStrategyGroup(opened, 'pruebas'),
-        filterByStrategyGroup(closed, 'pruebas'),
-        this.processStartedAt,
-        now,
+      pruebas: buildGroupMetrics(opened, closed, 'pruebas', (o, c) =>
+        calculateSummaryMetrics(o, c, this.processStartedAt, now),
       ),
     };
 

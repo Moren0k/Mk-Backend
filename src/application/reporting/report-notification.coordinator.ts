@@ -29,10 +29,10 @@ import { selectChannelsByGroup } from '../notification/notification-channel-sele
  * Operation puntual): mismo principio de responsabilidad única que separa
  * StrategyCoordinator de OperationCoordinator.
  *
- * El reporte horario es exclusivamente del grupo oficial (ver
- * ReportScheduler, que ya filtra los datos): el destino se elige de forma
- * explícita con `selectChannelsByGroup(..., 'oficial')` y `dispatchTo`, en
- * vez de `dispatchToAll`/`supports()`. Antes dependía de que la Notification
+ * ReportScheduler publica un evento por grupo (oficial y pruebas, cada uno
+ * ya filtrado): el destino se elige de forma explícita por evento con
+ * `selectChannelsByGroup(..., report.group)` y `dispatchTo`, en vez de
+ * `dispatchToAll`/`supports()`. Antes dependía de que la Notification
  * llevara `metadata` vacía para que el canal de pruebas la descartara "por
  * casualidad" — una regla de negocio no debe depender de un efecto
  * colateral.
@@ -42,7 +42,7 @@ export class ReportNotificationCoordinator
   implements OnModuleInit, OnModuleDestroy
 {
   private readonly channelDispatcher: NotificationChannelDispatcher;
-  private readonly officialChannels: readonly NotificationChannel[];
+  private readonly channels: readonly NotificationChannel[];
 
   private readonly hourlyHandler: DomainEventHandler<HourlyReportGeneratedEvent> =
     {
@@ -61,7 +61,7 @@ export class ReportNotificationCoordinator
       channels,
       errorTracker,
     );
-    this.officialChannels = selectChannelsByGroup(channels, 'oficial');
+    this.channels = channels;
   }
 
   onModuleInit(): void {
@@ -79,7 +79,9 @@ export class ReportNotificationCoordinator
   }
 
   private dispatch(report: ReportSnapshot): void {
-    this.channelDispatcher.dispatchTo(this.officialChannels, (channelType) =>
+    const targetChannels = selectChannelsByGroup(this.channels, report.group);
+
+    this.channelDispatcher.dispatchTo(targetChannels, (channelType) =>
       this.notificationFactory.createForHourlyReport(report, channelType),
     );
   }

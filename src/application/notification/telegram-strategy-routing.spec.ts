@@ -11,12 +11,13 @@ import { NotificationChannelDispatcher } from './notification-channel-dispatcher
 
 /**
  * Verifica el enrutamiento real por estrategia entre el canal oficial de
- * Telegram y el de pruebas (ver NotificationModule): streak-4 (y solo
- * streak-4) debe llegar exclusivamente al canal de pruebas; cualquier otra
- * estrategia (o ninguna, como los reportes) debe llegar exclusivamente al
- * canal oficial. Usa instancias reales de TelegramChannel, configuradas
- * igual que en NotificationModule (mismo `resolveStrategyGroup` de
- * `core/strategy`, no una copia local), en vez de dobles genéricos.
+ * Telegram y el de pruebas (ver NotificationModule): alternancia-34 (y
+ * solo las estrategias marcadas como "solo pruebas" en strategy-group.ts)
+ * debe llegar exclusivamente al canal de pruebas; cualquier otra estrategia
+ * (o ninguna, como los reportes) debe llegar exclusivamente al canal
+ * oficial. Usa instancias reales de TelegramChannel, configuradas igual que
+ * en NotificationModule (mismo `resolveStrategyGroup` de `core/strategy`,
+ * no una copia local), en vez de dobles genéricos.
  */
 describe('Telegram official/test channel routing', () => {
   function buildOfficialChannel(
@@ -105,7 +106,7 @@ describe('Telegram official/test channel routing', () => {
     expect(testSend).not.toHaveBeenCalled();
   });
 
-  it('routes streak-4 notifications only to the test channel', () => {
+  it('routes streak-4 notifications only to the official channel', () => {
     const official = buildOfficialChannel();
     const test = buildTestChannel();
     const officialSend = jest
@@ -116,6 +117,22 @@ describe('Telegram official/test channel routing', () => {
       .mockResolvedValue({ delivered: true, messageId: 1 });
 
     dispatchWithStrategy(official, test, 'streak-4');
+
+    expect(officialSend).toHaveBeenCalledTimes(1);
+    expect(testSend).not.toHaveBeenCalled();
+  });
+
+  it('routes alternancia-34 notifications only to the test channel', () => {
+    const official = buildOfficialChannel();
+    const test = buildTestChannel();
+    const officialSend = jest
+      .spyOn(official, 'send')
+      .mockResolvedValue({ delivered: true, messageId: 1 });
+    const testSend = jest
+      .spyOn(test, 'send')
+      .mockResolvedValue({ delivered: true, messageId: 1 });
+
+    dispatchWithStrategy(official, test, 'alternancia-34');
 
     expect(officialSend).not.toHaveBeenCalled();
     expect(testSend).toHaveBeenCalledTimes(1);
@@ -147,7 +164,7 @@ describe('Telegram official/test channel routing', () => {
       .spyOn(test, 'send')
       .mockResolvedValue({ delivered: true, messageId: 1 });
 
-    dispatchWithStrategy(official, test, 'streak-4');
+    dispatchWithStrategy(official, test, 'alternancia-34');
 
     expect(officialSend).not.toHaveBeenCalled();
     expect(testSend).not.toHaveBeenCalled();

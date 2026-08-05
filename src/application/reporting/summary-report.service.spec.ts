@@ -110,7 +110,7 @@ describe('SummaryReportService', () => {
       },
       {
         operationId: 'op-2',
-        strategyId: 'streak-4',
+        strategyId: 'alternancia-34',
         openedAt: new Date('2026-08-01T15:00:00.000Z'),
       },
     ]);
@@ -126,7 +126,7 @@ describe('SummaryReportService', () => {
       },
       {
         operationId: 'op-2',
-        strategyId: 'streak-4',
+        strategyId: 'alternancia-34',
         openedAt: new Date('2026-08-01T15:00:00.000Z'),
         closedAt: new Date('2026-08-01T15:05:00.000Z'),
         result: OperationState.LOST,
@@ -176,7 +176,7 @@ describe('SummaryReportService', () => {
       },
       {
         operationId: 'op-2',
-        strategyId: 'streak-4',
+        strategyId: 'alternancia-34',
         openedAt: new Date('2026-08-01T15:00:00.000Z'),
       },
     ]);

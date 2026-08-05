@@ -1,6 +1,7 @@
 import { Module, Provider } from '@nestjs/common';
 
 import { STRATEGIES } from '../../core/constants/injection-tokens.constants';
+import { Alternancia34Strategy } from '../../core/strategy/strategies/alternancia34.strategy';
 import { Streak3Strategy } from '../../core/strategy/strategies/streak3.strategy';
 import { Streak4Strategy } from '../../core/strategy/strategies/streak4.strategy';
 import { DomainEventBusModule } from '../domain-events/domain-event-bus.module';
@@ -22,11 +23,12 @@ import { StrategyCoordinator } from './strategy.coordinator';
  */
 const strategiesProvider: Provider = {
   provide: STRATEGIES,
-  useFactory: (streak3: Streak3Strategy, streak4: Streak4Strategy) => [
-    streak3,
-    streak4,
-  ],
-  inject: [Streak3Strategy, Streak4Strategy],
+  useFactory: (
+    streak3: Streak3Strategy,
+    streak4: Streak4Strategy,
+    alternancia34: Alternancia34Strategy,
+  ) => [streak3, streak4, alternancia34],
+  inject: [Streak3Strategy, Streak4Strategy, Alternancia34Strategy],
 };
 
 @Module({
@@ -40,6 +42,7 @@ const strategiesProvider: Provider = {
     StrategyCoordinator,
     Streak3Strategy,
     Streak4Strategy,
+    Alternancia34Strategy,
     strategiesProvider,
     InMemoryStrategyRuntimeState,
   ],

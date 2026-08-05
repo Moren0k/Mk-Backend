@@ -16,10 +16,11 @@ qué bot de Telegram se envía el resumen:
 | `"pruebas"` | Solo al bot/chat de pruebas (`TELEGRAM_PRUEBAS_BOT_TOKEN`/`TELEGRAM_PRUEBAS_CHAT_ID`). |
 | `"todos"`   | A ambos. **Es el valor por defecto si no envías `channel`.**                           |
 
-A diferencia de las alertas automáticas de estrategias (donde streak-3 va
-siempre al canal oficial y streak-4 siempre al de pruebas, sin excepción),
-el resumen no está atado a ninguna estrategia: por eso puedes elegir
-libremente su destino con este campo.
+A diferencia de las alertas automáticas de estrategias (donde cada
+estrategia va siempre al canal que le corresponde según `strategy-group.ts`
+— hoy, streak-4 al oficial; streak-3 desactivada; el canal de pruebas sin
+estrategia activa, sin excepción), el resumen no está atado a ninguna
+estrategia: por eso puedes elegir libremente su destino con este campo.
 
 ## 1. Configurar la contraseña
 
@@ -159,3 +160,8 @@ curl -i -X POST http://localhost:3000/admin/commands \
   bot lleva días corriendo, el resumen refleja todo ese tiempo.
 - Este endpoint no afecta el reporte horario automático ni ninguna otra
   parte del motor — es un flujo aparte que solo lee el mismo historial.
+- El reporte horario automático (no este endpoint) también corre de forma
+  independiente para ambos canales: cada hora se genera y envía un
+  reporte al chat oficial y otro al chat de pruebas, cada uno con sus
+  propias métricas (ver `ReportScheduler`). Antes solo existía para el
+  canal oficial.

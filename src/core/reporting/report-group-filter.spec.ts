@@ -9,8 +9,8 @@ function build(operationId: string, strategyId: string): Record {
 describe('filterByStrategyGroup', () => {
   const records = [
     build('op-1', 'streak-3'),
-    build('op-2', 'streak-4'),
-    build('op-3', 'streak-3'),
+    build('op-2', 'alternancia-34'),
+    build('op-3', 'streak-4'),
   ];
 
   it('keeps only records classified as "oficial"', () => {
@@ -27,7 +27,7 @@ describe('filterByStrategyGroup', () => {
 
   it('returns an empty array when nothing matches the group', () => {
     expect(
-      filterByStrategyGroup([build('op-1', 'streak-3')], 'pruebas'),
+      filterByStrategyGroup([build('op-1', 'streak-4')], 'pruebas'),
     ).toEqual([]);
   });
 });
