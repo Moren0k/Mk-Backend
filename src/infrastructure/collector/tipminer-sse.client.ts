@@ -7,7 +7,7 @@ import { TIPMINER_BROWSER_HEADERS } from './tipminer-browser-headers';
 import { buildTipminerLiveUrl, TipminerConfig } from './tipminer-endpoints';
 
 /**
- * Cliente SSE contra el stream en vivo de Tipminer (ver API.MD, sección 6),
+ * Cliente SSE contra el stream en vivo de Tipminer (ver API.md, sección 6),
  * implementado con la librería `eventsource` (WHATWG/W3C EventSource para
  * Node.js, ampliamente usada y mantenida: https://github.com/EventSource/eventsource).
  *
@@ -63,7 +63,7 @@ export class TipminerSseClient implements SseClient {
    * sin ellos, el SSE se identifica como un script genérico, lo que varios
    * WAF bloquean sin importar la IP de origen. Si además hay
    * TIPMINER_API_KEY definida (para cuando la API deje de ser pública, ver
-   * API.MD), se suma el Authorization.
+   * API.md), se suma el Authorization.
    */
   private buildInit(): EventSourceInit {
     const apiKey = this.configService.get<string>('tipminer.apiKey');

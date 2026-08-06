@@ -9,7 +9,7 @@ import { TIPMINER_BROWSER_HEADERS } from './tipminer-browser-headers';
 
 /**
  * Obtiene las últimas MAX_HISTORY_SIZE partidas desde la API pública de
- * Tipminer (ver API.MD, sección 5). La API las devuelve de más reciente a
+ * Tipminer (ver API.md, sección 5). La API las devuelve de más reciente a
  * más antigua; este cliente no reordena nada, esa decisión pertenece a
  * quien consume el resultado (GameEventCollector).
  */

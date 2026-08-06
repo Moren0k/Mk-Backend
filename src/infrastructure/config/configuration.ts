@@ -38,7 +38,7 @@ export default () => ({
       process.env.TIPMINER_PROVIDER_ID ??
       'cc71e81d-8b56-4868-91c7-7224be543dce',
     timezone: process.env.TIPMINER_TIMEZONE ?? 'America/Sao_Paulo',
-    // Reservado para cuando la API requiera autenticación (ver API.MD: hoy es pública).
+    // Reservado para cuando la API requiera autenticación (ver API.md: hoy es pública).
     apiKey: process.env.TIPMINER_API_KEY,
   },
   database: {

@@ -5,7 +5,7 @@ export type TipminerConfig = {
 };
 
 /**
- * Construye las URLs de la API pública de Tipminer (ver API.MD) a partir de
+ * Construye las URLs de la API pública de Tipminer (ver API.md) a partir de
  * la configuración leída de variables de entorno. Nunca hardcodear rutas
  * fuera de este archivo.
  */

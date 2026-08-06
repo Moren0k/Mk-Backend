@@ -149,7 +149,7 @@ note right of jugadas::payload_original
   Red de seguridad ante cambios de
   esquema del proveedor (ya ocurrió una
   vez: version/externalId desaparecieron
-  sin aviso, ver API.MD §5).
+  sin aviso, ver API.md §5).
   NULLABLE: no bloquea una futura
   importación masiva sin el JSON original.
 end note
@@ -183,7 +183,7 @@ end note
 | `payload_original` | `JSONB` | **Sí, a propósito** | payload crudo completo | Red de seguridad ante cambios de esquema de la API. Nullable para no bloquear una futura importación masiva sin el JSON original. |
 | `insertado_en` | `TIMESTAMPTZ(3)` | No | — (interno) | `DEFAULT now()`. No viene de la API: mide lag de ingesta / caídas del collector. |
 
-**Evaluados y descartados explícitamente** (no solo "omitidos"): `version` y `externalId` — documentados alguna vez por la API pero ausentes en la práctica desde al menos 2026-08-06 (ver `API.MD` §5), y `version` resultó ser un contador por mesa, no global, así que tampoco tenía el valor esperado. `source` (qué cliente originó la fila, `/history` vs. `/live`) — descartado porque solo habrá un servicio de ingesta poblando la tabla.
+**Evaluados y descartados explícitamente** (no solo "omitidos"): `version` y `externalId` — documentados alguna vez por la API pero ausentes en la práctica desde al menos 2026-08-06 (ver `API.md` §5), y `version` resultó ser un contador por mesa, no global, así que tampoco tenía el valor esperado. `source` (qué cliente originó la fila, `/history` vs. `/live`) — descartado porque solo habrá un servicio de ingesta poblando la tabla.
 
 **Campos de la API que nunca llegan a esta tabla**: metadata del juego/casino (`logo`, `displayName`, `country`, `description`, `referral`, timestamps de administración del catálogo) obtenida de `/v1/casinos`/`/v1/games/status` — describe *dónde se juega*, no *lo que ocurrió en una ronda*; es redundante (el mismo `provider` de Bac Bo aparece repetido en 6+ marcas de casino distintas) y no aporta nada al análisis de patrones. Si algún día hace falta, vive en una tabla `mesas`/`proveedores` separada, no en `jugadas`.
 
@@ -201,7 +201,7 @@ end note
 
 ## 7. Riesgos conocidos
 
-- **El esquema de la API cambia sin aviso — ya ocurrió una vez.** `version`/`externalId` estaban documentados en `API.MD` el 2026-08-01 y habían desaparecido de la respuesta real el 2026-08-06 (ver `API.MD` §5). Ninguna columna nueva que dependa de la API debe asumirse estable sin verificarla en vivo primero.
+- **El esquema de la API cambia sin aviso — ya ocurrió una vez.** `version`/`externalId` estaban documentados en `API.md` el 2026-08-01 y habían desaparecido de la respuesta real el 2026-08-06 (ver `API.md` §5). Ninguna columna nueva que dependa de la API debe asumirse estable sin verificarla en vivo primero.
 - **Duplicados por reconexión SSE + reintentos de historial**: la misma ronda puede llegar por dos vías. Mitigado con `UNIQUE (uuid)` + `ON CONFLICT (uuid) DO NOTHING` al insertar (a implementar en el futuro servicio de ingesta).
 - **Inmutabilidad de rondas ya publicadas**: observada (0 cambios en ~198 filas repetidas entre llamadas durante la verificación), pero no es una garantía contractual de Tipminer.
 - **Un `ganador` no contemplado en el futuro** no rompe el `INSERT` (por diseño, ver §6), pero sí requiere que la capa de aplicación decida cómo reaccionar — ver preguntas abiertas.

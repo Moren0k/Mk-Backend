@@ -18,8 +18,8 @@ qué bot de Telegram se envía el resumen:
 
 A diferencia de las alertas automáticas de estrategias (donde cada
 estrategia va siempre al canal que le corresponde según `strategy-group.ts`
-— hoy, streak-4 al oficial; streak-3 desactivada; el canal de pruebas sin
-estrategia activa, sin excepción), el resumen no está atado a ninguna
+— hoy, `streak-4` al oficial; `streak-3` desactivada; `alternancia-34` activa
+en el canal de pruebas), el resumen no está atado a ninguna
 estrategia: por eso puedes elegir libremente su destino con este campo.
 
 ## 1. Configurar la contraseña
@@ -69,7 +69,7 @@ curl -X POST http://localhost:3000/admin/commands \
 ```powershell
 Invoke-RestMethod -Method Post -Uri "http://localhost:3000/admin/commands" `
   -ContentType "application/json" `
-  -Body (@{ password = "MYK"; command = "RESUMEN"} | ConvertTo-Json)
+  -Body (@{ password = "123456"; command = "RESUMEN"; channel = "pruebas"} | ConvertTo-Json)
 ```
 
 ### Respuesta esperada (200 OK)

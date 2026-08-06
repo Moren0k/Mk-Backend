@@ -4,12 +4,15 @@ Motor de procesamiento de eventos en tiempo real que analiza las jugadas de **Ba
 
 No es un CRUD: todo el sistema gira alrededor de un único disparador — **llega una jugada nueva** — y se comunica internamente mediante un bus de eventos de dominio, sin que ningún componente conozca a otro directamente.
 
-Para el detalle completo de la arquitectura (capas, decisiones de diseño, análisis de rendimiento, formato de notificaciones) ver [`ARCHITECTURE.md`](./ARCHITECTURE.md). Para el contrato de la API de Tipminer, ver [`API.MD`](./API.MD).
+Para el detalle completo de la arquitectura (capas, decisiones de diseño, análisis de rendimiento, formato de notificaciones) ver [`ARCHITECTURE.md`](./ARCHITECTURE.md). Para el contrato de la API de Tipminer, ver [`API.md`](./API.md).
 
 ## Qué hace
 
 1. Escucha las jugadas de BacBo en vivo (SSE) y carga un historial inicial (HTTP).
-2. Evalúa estrategias sobre ese historial — hoy, `Streak4Strategy` (canal oficial): cuando una racha de 4 resultados iguales (PLAYER o BANKER) aparece, recomienda apostar al resultado opuesto.
+2. Evalúa estrategias sobre ese historial:
+   - **`Streak4Strategy`** (canal oficial, activa): cuando una racha de 4 resultados iguales (PLAYER o BANKER) aparece, recomienda apostar al resultado opuesto.
+   - **`Streak3Strategy`** (registrada, desactivada): misma lógica con racha de 3. Conservada como referencia.
+   - **`Alternancia34Strategy`** (canal de pruebas, activa): estrategia adaptativa con score de confianza (0-100) que alterna automáticamente entre racha-3 y racha-4 según el rendimiento reciente, con modo STOP (0-54) que pausa señales y opera en modo virtual para recuperar el score. Ver [`Confianza34.md`](./Confianza34.md) para el diseño completo.
 3. Abre una operación simulada con hasta 2 pasos de martingala (MG1, MG2) y la sigue hasta que gana o pierde.
 4. **Notifica cada evento relevante por Telegram** con formato personalizado:
    - 🚨 Entrada con la última jugada de la racha (`streakWinner`) y la apuesta recomendada
@@ -49,7 +52,7 @@ pnpm start:dev
 | `ADMIN_PASSWORD` | Contraseña del endpoint `POST /admin/commands`. Se hashea al arrancar; vacía = endpoint deshabilitado. |
 | `TELEGRAM_BOT_TOKEN` | Token del bot de Telegram oficial (se obtiene con `@BotFather`). |
 | `TELEGRAM_CHAT_ID` | Id del chat/grupo oficial donde el bot envía las alertas. |
-| `TELEGRAM_PRUEBAS_BOT_TOKEN` | Token del bot de Telegram de pruebas. Recibe exclusivamente las señales de estrategias marcadas como "solo pruebas" en `strategy-group.ts` (hoy, ninguna activa: `alternancia-34` está preparada pero deshabilitada); nunca las del canal oficial. |
+| `TELEGRAM_PRUEBAS_BOT_TOKEN` | Token del bot de Telegram de pruebas. Recibe exclusivamente las señales de estrategias marcadas como "solo pruebas" en `strategy-group.ts` (actualmente `alternancia-34`, activa); nunca las del canal oficial. |
 | `TELEGRAM_PRUEBAS_CHAT_ID` | Id del chat/grupo de pruebas asociado a `TELEGRAM_PRUEBAS_BOT_TOKEN`. |
 | `TELEGRAM_PRUEBAS_ENABLED` | Interruptor de modo pruebas (`true`/`false`, default `true`). En `false`, el chat de pruebas no recibe absolutamente nada (ni alertas en vivo ni resúmenes), sin pausar la evaluación interna de la estrategia. |
 | `TIPMINER_BASE_URL` | Base de la API pública de Tipminer. Trae un valor por defecto. |
@@ -81,7 +84,7 @@ Tipminer (SSE/HTTP)
     ▼
 GameEventCollector → HistoryStore → GameReceivedEvent
     │
-    ├── StrategyCoordinator → Streak4Strategy → StrategyTriggeredEvent
+    ├── StrategyCoordinator → Streak4Strategy / Alternancia34Strategy → StrategyTriggeredEvent
     │                                                        │
     │                                              (recommendedWinner + streakWinner)
     │                                                        │

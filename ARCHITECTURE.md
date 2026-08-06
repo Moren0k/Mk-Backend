@@ -1,6 +1,6 @@
 # Arquitectura — Motor de Análisis BacBo
 
-> Refleja el estado real del código al cierre de la Etapa 9 (notificaciones personalizadas, distribución de porcentajes, empates visibles, streakWinner, borrado de mensajes intermedios). Fuente de verdad conceptual: `INIT.md`. Este documento describe la implementación concreta.
+> Refleja el estado real del código al cierre de la Etapa 10 — estrategia adaptativa `alternancia34` con score de confianza, zonas AGRESIVA/CONSERVADORA/STOP, operaciones virtuales, y recuperación pasiva. Fuente de verdad conceptual: `INIT.md`. Este documento describe la implementación concreta.
 
 ---
 
@@ -29,8 +29,8 @@ StrategyCoordinator                       OperationCoordinator  StatisticsServic
 (ignora si isHistorical===true)             (actualiza activas)  (cuenta TODO,     (cuenta TODO,
         │                                                        incl. historial)  incl. historial)
         ▼
-   Streak4Strategy.evaluate(context)
-        │ (si detecta racha de 4, y la partida NO es histórica)
+   Streak4Strategy.evaluate(context)     ← canal oficial (racha-4)
+   Alternancia34Strategy.evaluate(context) ← canal pruebas (score confianza, alterna racha-3/4)
         ▼
    StrategyTriggeredEvent { recommendedWinner, streakWinner }
         │
@@ -81,7 +81,7 @@ StrategyCoordinator                       OperationCoordinator  StatisticsServic
 
 | Capa | Regla | Ejemplos |
 |---|---|---|
-| `core/` | TypeScript puro. Nunca importa `@nestjs/*`. Nunca importa de `application/` ni `infrastructure/`. | `Operation`, `Streak4Strategy`, `InMemoryHistoryStore`, `InMemoryDomainEventBus`, `Statistics`, `EngineMetrics`, `EngineErrorTracker`, todos los `DomainEvent`, `DistributionMetricValue`, `SendResult`, `MessageType` |
+| `core/` | TypeScript puro. Nunca importa `@nestjs/*`. Nunca importa de `application/` ni `infrastructure/`. | `Operation`, `Streak4Strategy`, `Alternancia34Strategy`, `InMemoryHistoryStore`, `InMemoryDomainEventBus`, `Statistics`, `EngineMetrics`, `EngineErrorTracker`, todos los `DomainEvent`, `DistributionMetricValue`, `SendResult`, `MessageType` |
 | `application/` | Orquesta. Puede depender de `core`. Nunca de `infrastructure`. | `StrategyCoordinator`, `OperationCoordinator`, `NotificationCoordinator`, `StatisticsService`, `EngineMetricsService`, `EngineHealth`, `DistributionMetric`, `MessageTracker`, `NotificationChannelDispatcher` |
 | `infrastructure/` | Integraciones externas. Puede depender de `core` y `application`. | `GameEventCollector`, `TipminerSseClient`, `TipminerGameHistoryClient`, `TelegramChannel` |
 
@@ -332,8 +332,10 @@ Todos los mensajes comparten:
 ### 12.1 Nueva estrategia
 
 Ver también `src/core/strategy/strategies/alternancia34.strategy.ts`, una
-plantilla real ya cableada que sigue exactamente esta guía (deshabilitada
-hasta que se implemente su lógica).
+estrategia adaptativa completamente implementada que usa un score de confianza
+(0-100) para alternar entre racha-3 (AGRESIVA, 85-100), racha-4 (CONSERVADORA,
+55-84) y STOP (0-54, sin señales reales, recuperación virtual). El diseño
+completo está documentado en [`Confianza34.md`](../../Confianza34.md).
 
 **Contrato a implementar** (`core/strategy/interfaces/strategy.interface.ts`):
 
