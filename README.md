@@ -56,6 +56,8 @@ pnpm start:dev
 | `TIPMINER_PROVIDER_ID` | uuid de la mesa Bac Bo en Tipminer. Trae un valor por defecto. |
 | `TIPMINER_TIMEZONE` | Timezone usada al pedir el historial. Opcional. |
 | `TIPMINER_API_KEY` | Reservado para cuando la API deje de ser pública; hoy no se usa. |
+| `DATABASE_URL` | Conexión pooled (pgbouncer, puerto 6543) a PostgreSQL/Supabase. Opcional: mientras no esté definida, `PrismaService` arranca deshabilitado y el bot sigue funcionando igual, sin persistencia (ver `src/infrastructure/persistence/`). |
+| `DIRECT_URL` | Conexión session-mode (puerto 5432) a la misma base, usada únicamente por Prisma Migrate. |
 
 ### Scripts
 
@@ -66,6 +68,10 @@ pnpm start:dev
 | `pnpm start:prod` | Corre el build compilado (`node dist/main.js`). |
 | `pnpm test` | Corre la suite de tests (Jest). |
 | `pnpm lint` | ESLint + Prettier. |
+| `pnpm db:generate` | Regenera el cliente de Prisma a partir de `prisma/schema.prisma`. |
+| `pnpm db:migrate:dev` | Crea y aplica una migración en desarrollo (requiere `DATABASE_URL`/`DIRECT_URL`). |
+| `pnpm db:migrate:deploy` | Aplica migraciones pendientes en producción. |
+| `pnpm db:studio` | Abre Prisma Studio contra la base configurada. |
 
 ## Flujo del sistema
 
@@ -119,9 +125,20 @@ src/
 ├── infrastructure/
 │   ├── collector/          GameEventCollector, SSE client, GameMapper
 │   ├── config/             AppConfigModule
+│   ├── persistence/        PrismaService, PersistenceModule (PostgreSQL/Supabase, tabla `jugadas`)
 │   ├── shared/             sleep utility
 │   └── telegram/           TelegramChannel, MarkdownV2 escaping, retry constants
 └── e2e/                    Test end-to-end del pipeline completo
 ```
+
+## Base de datos
+
+`prisma/schema.prisma` define la conexión a PostgreSQL/Supabase y el modelo `Jugada`
+(tabla `jugadas`): el historial real de rondas de BacBo, fuente de verdad para el
+futuro motor de análisis de patrones. Cómo conectarse (código, `psql`, Prisma Studio,
+panel de Supabase), el esquema completo y las decisiones de diseño están en
+[`DATABASE.md`](./DATABASE.md).
+
+![Diagrama de la tabla jugadas](docs/Database.png)
 
 Detalle completo de capas, eventos, módulos NestJS y decisiones de diseño en [`ARCHITECTURE.md`](./ARCHITECTURE.md).

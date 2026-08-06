@@ -12,6 +12,7 @@ Documentación de referencia (leer antes de tocar la arquitectura):
 - [`README.md`](./README.md) — visión general, variables de entorno, diagrama de secuencia.
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — capas, eventos, módulos NestJS y decisiones de diseño clave (§8), incluyendo por qué el orden de `imports` de NestJS no debe importar para la corrección del sistema.
 - [`API.MD`](./API.MD) — contrato verificado de la API de Tipminer (endpoints, IDs de la mesa Bac Bo, formato SSE).
+- [`DATABASE.md`](./DATABASE.md) — base de datos (PostgreSQL/Supabase vía Prisma): cómo conectarse, esquema real de la tabla `jugadas`, diagramas y decisiones de diseño.
 - `INIT.md` — documento de arquitectura original/objetivo (fuente de verdad conceptual; `ARCHITECTURE.md` describe el estado real implementado).
 
 ## Comandos

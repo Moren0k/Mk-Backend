@@ -41,4 +41,11 @@ export default () => ({
     // Reservado para cuando la API requiera autenticación (ver API.MD: hoy es pública).
     apiKey: process.env.TIPMINER_API_KEY,
   },
+  database: {
+    // Sin defaults: mientras no estén definidas, PrismaService arranca
+    // deshabilitado (ver src/infrastructure/persistence/) sin afectar al
+    // resto del motor.
+    url: process.env.DATABASE_URL,
+    directUrl: process.env.DIRECT_URL,
+  },
 });
