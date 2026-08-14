@@ -25,6 +25,7 @@ import {
   StrategyContext,
 } from '../../core/strategy/types/strategy-context.type';
 import { InMemoryStrategyRuntimeState } from './in-memory-strategy-runtime-state';
+import { StrategyChannelRegistry } from './strategy-channel-registry';
 
 /**
  * Subscriber de GameReceivedEvent: por cada jugada nueva EN VIVO, arma un
@@ -39,6 +40,16 @@ import { InMemoryStrategyRuntimeState } from './in-memory-strategy-runtime-state
  *
  * No conoce ninguna estrategia concreta (nunca `instanceof`/`switch`) ni
  * ningún subscriber de StrategyTriggeredEvent: solo publica y sigue.
+ *
+ * **Gate de encendido/apagado (2026-08-11, a pedido explícito):** una
+ * estrategia solo se evalúa si `StrategyChannelRegistry.isActiveFor(id)`
+ * es `true` — es decir, está asignada a un canal y ese canal está activo,
+ * ambos configurados vía `PATCH /api/v1/channels/:channel`. Por default
+ * ninguna estrategia está asignada a ningún canal, así que el motor no
+ * genera señales hasta que se configure explícitamente. `strategy.enabled()`
+ * ya no es una fuente de verdad de negocio (queda como interruptor de
+ * código, hoy siempre `true` en las tres estrategias registradas); el
+ * único "encendido" real es el registro mutable, nunca una constante.
  */
 @Injectable()
 export class StrategyCoordinator
@@ -57,6 +68,7 @@ export class StrategyCoordinator
     @Inject(STRATEGY_EXECUTION_GUARD)
     private readonly executionGuard: StrategyExecutionGuard,
     private readonly runtimeState: InMemoryStrategyRuntimeState,
+    private readonly configProvider: StrategyChannelRegistry,
   ) {}
 
   onModuleInit(): void {
@@ -77,6 +89,7 @@ export class StrategyCoordinator
       this.historyStore.createSnapshot(),
       this.executionGuard,
       this.runtimeState,
+      this.configProvider,
       new Date(),
     );
 
@@ -87,6 +100,10 @@ export class StrategyCoordinator
 
   private evaluateStrategy(strategy: Strategy, context: StrategyContext): void {
     if (!strategy.enabled()) {
+      return;
+    }
+
+    if (!this.configProvider.isActiveFor(strategy.id)) {
       return;
     }
 

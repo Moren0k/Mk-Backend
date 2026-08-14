@@ -8,6 +8,7 @@ import { NotificationCoordinator } from '../application/notification/notificatio
 import { ActiveOperationRegistry } from '../application/operation/active-operation-registry';
 import { OperationCoordinator } from '../application/operation/operation.coordinator';
 import { InMemoryStrategyRuntimeState } from '../application/strategy/in-memory-strategy-runtime-state';
+import { StrategyChannelRegistry } from '../application/strategy/strategy-channel-registry';
 import { StrategyCoordinator } from '../application/strategy/strategy.coordinator';
 import { DomainEvent } from '../core/domain-events/base/domain-event';
 import { DomainEventHandler } from '../core/domain-events/base/domain-event-handler.interface';
@@ -103,6 +104,14 @@ function buildEngine(): Engine {
   const errorTracker = new EngineErrorTracker();
   const activeOperationRegistry = new ActiveOperationRegistry();
   const strategyRuntimeState = new InMemoryStrategyRuntimeState();
+  const strategyChannelRegistry = new StrategyChannelRegistry(
+    activeOperationRegistry,
+  );
+  // Por default (2026-08-11) ninguna estrategia está asignada a ningún
+  // canal: hay que configurarlo explícitamente, igual que haría un
+  // operador real vía PATCH /api/v1/channels/oficial antes de operar.
+  strategyChannelRegistry.assignStrategyToChannel('streak-4', 'oficial');
+  strategyChannelRegistry.setActive('oficial', true);
 
   const strategyCoordinator = new StrategyCoordinator(
     historyStore,
@@ -111,6 +120,7 @@ function buildEngine(): Engine {
     errorTracker,
     activeOperationRegistry,
     strategyRuntimeState,
+    strategyChannelRegistry,
   );
   const operationCoordinator = new OperationCoordinator(
     domainEventBus,

@@ -1,5 +1,6 @@
 import { Game } from '../../history/game.type';
 import { HistorySnapshot } from '../../interfaces/history-snapshot.interface';
+import { StrategyConfigProvider } from '../interfaces/strategy-config-provider.interface';
 import { StrategyExecutionGuard } from '../interfaces/strategy-execution-guard.interface';
 import { StrategyRuntimeState } from '../interfaces/strategy-runtime-state.interface';
 
@@ -12,13 +13,17 @@ import { StrategyRuntimeState } from '../interfaces/strategy-runtime-state.inter
  * OperationCoordinator: solo responde si la estrategia puede emitir señal
  * ahora mismo (ver StrategyExecutionGuard). `runtimeState` es la única
  * puerta por la que una estrategia puede recordar algo entre evaluaciones,
- * aislado por su propio strategyId (ver StrategyRuntimeState).
+ * aislado por su propio strategyId (ver StrategyRuntimeState). `config` es
+ * la única puerta por la que puede leer parámetros mutables desde afuera
+ * (hoy solo `maxMartingales`, Mk-Api.md Anexo E.3) sin acoplarse a cómo se
+ * administra esa mutabilidad.
  */
 export type StrategyContext = {
   readonly currentGame: Game;
   readonly historySnapshot: HistorySnapshot;
   readonly execution: StrategyExecutionGuard;
   readonly runtimeState: StrategyRuntimeState;
+  readonly config: StrategyConfigProvider;
   readonly timestamp: Date;
 };
 
@@ -32,6 +37,7 @@ export function createStrategyContext(
   historySnapshot: HistorySnapshot,
   execution: StrategyExecutionGuard,
   runtimeState: StrategyRuntimeState,
+  config: StrategyConfigProvider,
   timestamp: Date,
 ): StrategyContext {
   return Object.freeze({
@@ -39,6 +45,7 @@ export function createStrategyContext(
     historySnapshot,
     execution,
     runtimeState,
+    config,
     timestamp,
   });
 }

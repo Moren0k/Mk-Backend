@@ -9,11 +9,7 @@ describe('resolveStrategyGroup', () => {
     expect(resolveStrategyGroup('streak-3')).toBe('oficial');
   });
 
-  it('classifies alternancia-34 as "pruebas"', () => {
-    expect(resolveStrategyGroup('alternancia-34')).toBe('pruebas');
-  });
-
-  it('classifies an unknown strategyId as "oficial"', () => {
+  it('classifies an unknown strategyId as "oficial" (TEST_ONLY_STRATEGY_IDS está vacío)', () => {
     expect(resolveStrategyGroup('some-future-strategy')).toBe('oficial');
   });
 

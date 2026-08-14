@@ -10,7 +10,7 @@
  */
 export type StrategyGroup = 'oficial' | 'pruebas';
 
-const TEST_ONLY_STRATEGY_IDS: ReadonlySet<string> = new Set(['alternancia-34']);
+const TEST_ONLY_STRATEGY_IDS: ReadonlySet<string> = new Set([]);
 
 export function resolveStrategyGroup(
   strategyId: string | undefined,

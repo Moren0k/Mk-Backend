@@ -1,6 +1,6 @@
 # Arquitectura — Motor de Análisis BacBo
 
-> Refleja el estado real del código al cierre de la Etapa 10 — estrategia adaptativa `alternancia34` con score de confianza, zonas AGRESIVA/CONSERVADORA/STOP, operaciones virtuales, y recuperación pasiva. Fuente de verdad conceptual: `INIT.md`. Este documento describe la implementación concreta.
+> Refleja el estado real del código: solo `Streak3Strategy` y `Streak4Strategy` están registradas. Fuente de verdad conceptual: `INIT.md`. Este documento describe la implementación concreta.
 
 ---
 
@@ -30,7 +30,6 @@ StrategyCoordinator                       OperationCoordinator  StatisticsServic
         │                                                        incl. historial)  incl. historial)
         ▼
    Streak4Strategy.evaluate(context)     ← canal oficial (racha-4)
-   Alternancia34Strategy.evaluate(context) ← canal pruebas (score confianza, alterna racha-3/4)
         ▼
    StrategyTriggeredEvent { recommendedWinner, streakWinner }
         │
@@ -81,11 +80,14 @@ StrategyCoordinator                       OperationCoordinator  StatisticsServic
 
 | Capa | Regla | Ejemplos |
 |---|---|---|
-| `core/` | TypeScript puro. Nunca importa `@nestjs/*`. Nunca importa de `application/` ni `infrastructure/`. | `Operation`, `Streak4Strategy`, `Alternancia34Strategy`, `InMemoryHistoryStore`, `InMemoryDomainEventBus`, `Statistics`, `EngineMetrics`, `EngineErrorTracker`, todos los `DomainEvent`, `DistributionMetricValue`, `SendResult`, `MessageType` |
+| `core/` | TypeScript puro. Nunca importa `@nestjs/*`. Nunca importa de `application/` ni `infrastructure/`. | `Operation`, `Streak3Strategy`, `Streak4Strategy`, `InMemoryHistoryStore`, `InMemoryDomainEventBus`, `Statistics`, `EngineMetrics`, `EngineErrorTracker`, todos los `DomainEvent`, `DistributionMetricValue`, `SendResult`, `MessageType` |
 | `application/` | Orquesta. Puede depender de `core`. Nunca de `infrastructure`. | `StrategyCoordinator`, `OperationCoordinator`, `NotificationCoordinator`, `StatisticsService`, `EngineMetricsService`, `EngineHealth`, `DistributionMetric`, `MessageTracker`, `NotificationChannelDispatcher` |
 | `infrastructure/` | Integraciones externas. Puede depender de `core` y `application`. | `GameEventCollector`, `TipminerSseClient`, `TipminerGameHistoryClient`, `TelegramChannel` |
+| `api/` | Presentación HTTP para el frontend propio. Controllers + contratos (`view-models`) + mappers manuales. Depende solo de `application` (nunca de `infrastructure` directo — regla verificada en CI vía ESLint). | `HealthController`, `OperationsController`, `ChannelsController`, `EventsController` (SSE), `ApiKeyGuard`, `GlobalExceptionFilter`, `ResponseEnvelopeInterceptor` |
 
 Verificado con `grep`: cero imports de `core/` hacia `application/`/`infrastructure/`, cero `@nestjs/*` dentro de `core/`.
+
+**Contrato completo de `api/` (cada endpoint, qué manda, qué devuelve, códigos de error, formato SSE):** ver [`documentacion_mk_api.md`](./documentacion_mk_api.md) — ese documento es la referencia de consumo pensada para quien construya el frontend, este documento (`ARCHITECTURE.md`) se queda en el diseño interno de capas y eventos.
 
 ---
 
@@ -331,12 +333,6 @@ Todos los mensajes comparten:
 
 ### 12.1 Nueva estrategia
 
-Ver también `src/core/strategy/strategies/alternancia34.strategy.ts`, una
-estrategia adaptativa completamente implementada que usa un score de confianza
-(0-100) para alternar entre racha-3 (AGRESIVA, 85-100), racha-4 (CONSERVADORA,
-55-84) y STOP (0-54, sin señales reales, recuperación virtual). El diseño
-completo está documentado en [`Confianza34.md`](../../Confianza34.md).
-
 **Contrato a implementar** (`core/strategy/interfaces/strategy.interface.ts`):
 
 ```ts
@@ -358,8 +354,8 @@ estrategias, `HistoryStore`, `DomainEventBus` ni Telegram — solo recibe un
 lógica es "racha de N resultados iguales", extender
 `StreakStrategyBase` (ver `Streak3Strategy`/`Streak4Strategy`) en vez de
 reimplementar la detección desde cero — solo cambian `streakLength`,
-`maxMartingales`, `id`, `name` y `description`. Si la lógica es distinta
-(como `alternancia34`), implementar `Strategy` directamente.
+`maxMartingales`, `id`, `name` y `description`. Si la lógica es distinta,
+implementar `Strategy` directamente.
 
 **Qué puede leer y usar** (todo vía `StrategyContext`, nunca por fuera de él):
 - `context.historySnapshot`: el historial hasta la partida actual. Recalcular

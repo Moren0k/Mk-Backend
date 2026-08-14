@@ -71,14 +71,19 @@ export class SummaryReportService {
     );
   }
 
-  generateAndDispatch(
-    channelSelector: SummaryReportChannelSelector = 'todos',
-  ): SummaryReportResult {
-    const now = new Date();
+  /**
+   * Variante de solo lectura de `generateAndDispatch`: mismo cálculo
+   * (oficial + pruebas, nunca mezclados), pero sin tocar
+   * `NotificationChannelDispatcher` — pensada para que un `GET` bajo
+   * demanda (dashboard del frontend, sondeado con frecuencia) pueda leer
+   * won/lost/alertsSent/uptimeMs sin disparar un mensaje de Telegram en
+   * cada llamada.
+   */
+  getSnapshot(now: Date = new Date()): SummaryReportResult {
     const opened = this.store.getAllOpened();
     const closed = this.store.getAllClosed();
 
-    const result: SummaryReportResult = {
+    return {
       oficial: buildGroupMetrics(opened, closed, 'oficial', (o, c) =>
         calculateSummaryMetrics(o, c, this.processStartedAt, now),
       ),
@@ -86,6 +91,13 @@ export class SummaryReportService {
         calculateSummaryMetrics(o, c, this.processStartedAt, now),
       ),
     };
+  }
+
+  generateAndDispatch(
+    channelSelector: SummaryReportChannelSelector = 'todos',
+  ): SummaryReportResult {
+    const now = new Date();
+    const result = this.getSnapshot(now);
 
     for (const group of GROUPS_BY_SELECTOR[channelSelector]) {
       this.channelDispatcher.dispatchTo(

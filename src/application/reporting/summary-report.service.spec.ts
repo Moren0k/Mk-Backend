@@ -101,6 +101,29 @@ describe('SummaryReportService', () => {
     expect(store.getClosedBetween).not.toHaveBeenCalled();
   });
 
+  describe('getSnapshot()', () => {
+    it('computes the same oficial/pruebas metrics as generateAndDispatch, without dispatching anything', () => {
+      store.getAllOpened.mockReturnValue([
+        {
+          operationId: 'op-1',
+          strategyId: 'streak-4',
+          openedAt: new Date('2026-08-01T15:00:00.000Z'),
+        },
+      ]);
+      const official = buildChannel();
+      const test = buildTestChannel();
+      const service = build([official, test]);
+
+      const snapshot = service.getSnapshot();
+
+      expect(snapshot.oficial.alertsSent).toBe(1);
+      expect(snapshot.pruebas.alertsSent).toBe(0);
+      expect(official.send).not.toHaveBeenCalled();
+      expect(test.send).not.toHaveBeenCalled();
+      expect(notificationFactory.createForSummaryReport).not.toHaveBeenCalled();
+    });
+  });
+
   it('returns independent oficial/pruebas metrics, filtered by strategy group', () => {
     store.getAllOpened.mockReturnValue([
       {
@@ -110,7 +133,7 @@ describe('SummaryReportService', () => {
       },
       {
         operationId: 'op-2',
-        strategyId: 'alternancia-34',
+        strategyId: 'streak-4',
         openedAt: new Date('2026-08-01T15:00:00.000Z'),
       },
     ]);
@@ -126,7 +149,7 @@ describe('SummaryReportService', () => {
       },
       {
         operationId: 'op-2',
-        strategyId: 'alternancia-34',
+        strategyId: 'streak-4',
         openedAt: new Date('2026-08-01T15:00:00.000Z'),
         closedAt: new Date('2026-08-01T15:05:00.000Z'),
         result: OperationState.LOST,
@@ -138,10 +161,10 @@ describe('SummaryReportService', () => {
 
     const result = service.generateAndDispatch();
 
-    expect(result.oficial.alertsSent).toBe(1);
+    expect(result.oficial.alertsSent).toBe(2);
     expect(result.oficial.won).toBe(1);
-    expect(result.pruebas.alertsSent).toBe(1);
-    expect(result.pruebas.lost).toBe(1);
+    expect(result.oficial.lost).toBe(1);
+    expect(result.pruebas.alertsSent).toBe(0);
   });
 
   it('sends only to the official channel, with only the official metrics, when selector is "oficial"', () => {
@@ -176,7 +199,7 @@ describe('SummaryReportService', () => {
       },
       {
         operationId: 'op-2',
-        strategyId: 'alternancia-34',
+        strategyId: 'streak-4',
         openedAt: new Date('2026-08-01T15:00:00.000Z'),
       },
     ]);
@@ -189,12 +212,12 @@ describe('SummaryReportService', () => {
     expect(official.send).toHaveBeenCalledTimes(1);
     expect(test.send).toHaveBeenCalledTimes(1);
     expect(notificationFactory.createForSummaryReport).toHaveBeenCalledWith(
-      expect.objectContaining({ alertsSent: 1 }),
+      expect.objectContaining({ alertsSent: 2 }),
       expect.any(Date),
       NotificationChannelType.TELEGRAM,
     );
     expect(notificationFactory.createForSummaryReport).toHaveBeenCalledWith(
-      expect.objectContaining({ alertsSent: 1 }),
+      expect.objectContaining({ alertsSent: 0 }),
       expect.any(Date),
       NotificationChannelType.TELEGRAM_PRUEBAS,
     );

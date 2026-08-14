@@ -100,7 +100,10 @@ export abstract class StreakStrategyBase implements Strategy {
       triggeredAt: context.timestamp,
       recommendedWinner,
       streakWinner: streak.winner,
-      maxMartingales: this.maxMartingales,
+      maxMartingales: context.config.getMaxMartingales(
+        this.id,
+        this.maxMartingales,
+      ),
       triggerGameUuid: context.currentGame.uuid,
       reason: `Racha de ${streak.length} resultados consecutivos de ${streak.winner}.`,
       metadata: {

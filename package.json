@@ -29,6 +29,7 @@
     "db:studio": "prisma studio"
   },
   "dependencies": {
+    "@fastify/cors": "^11.3.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.0",
     "@nestjs/core": "^11.0.1",

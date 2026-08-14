@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 
+import { ApiModule } from './api/api.module';
 import { AppConfigModule } from './infrastructure/config/app-config.module';
-import { AdminModule } from './application/admin/admin.module';
 import { HistoryModule } from './application/history/history.module';
 import { StrategyModule } from './application/strategy/strategy.module';
 import { OperationModule } from './application/operation/operation.module';
@@ -46,8 +46,8 @@ import { PersistenceModule } from './infrastructure/persistence/persistence.modu
     StatisticsModule,
     ObservabilityModule,
     ReportingModule,
-    AdminModule,
     PersistenceModule,
+    ApiModule,
   ],
 })
 export class AppModule {}

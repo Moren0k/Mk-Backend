@@ -136,14 +136,14 @@ describe('ReportScheduler', () => {
       },
       {
         operationId: 'op-2',
-        strategyId: 'alternancia-34',
+        strategyId: 'streak-4',
         openedAt: new Date('2026-08-01T15:20:00.000Z'),
       },
     ]);
     store.getClosedBetween.mockReturnValue([
       {
         operationId: 'op-2',
-        strategyId: 'alternancia-34',
+        strategyId: 'streak-4',
         openedAt: new Date('2026-08-01T15:20:00.000Z'),
         closedAt: new Date('2026-08-01T15:25:00.000Z'),
         result: OperationState.WON,
@@ -161,11 +161,11 @@ describe('ReportScheduler', () => {
     const oficial = events.find((report) => report.group === 'oficial')!;
     const pruebas = events.find((report) => report.group === 'pruebas')!;
 
-    expect(oficial.metrics.alertsSent).toBe(1);
-    expect(oficial.metrics.closedOperations).toBe(0);
-    expect(pruebas.metrics.alertsSent).toBe(1);
-    expect(pruebas.metrics.closedOperations).toBe(1);
-    expect(pruebas.metrics.won).toBe(1);
+    expect(oficial.metrics.alertsSent).toBe(2);
+    expect(oficial.metrics.closedOperations).toBe(1);
+    expect(oficial.metrics.won).toBe(1);
+    expect(pruebas.metrics.alertsSent).toBe(0);
+    expect(pruebas.metrics.closedOperations).toBe(0);
   });
 
   it('reschedules itself for the following hour after firing', () => {

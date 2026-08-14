@@ -4,7 +4,7 @@
 
 ## La idea general
 
-Cada vez que se juega una ronda del juego, el sistema la revisa contra los patrones que conoce. El sistema conoce tres patrones distintos, pero solo uno de ellos está realmente actuando hoy — los otros dos existen en el sistema, pero uno está apagado a propósito y el otro todavía no está terminado. Además de reaccionar a esos patrones, el sistema lleva estadísticas generales de todo lo que pasa y manda resúmenes periódicos, sin importar si hubo o no un patrón.
+Cada vez que se juega una ronda del juego, el sistema la revisa contra los patrones que conoce. El sistema conoce dos patrones distintos, pero solo uno de ellos está realmente actuando hoy — el otro existe en el sistema, pero está apagado a propósito. Además de reaccionar a esos patrones, el sistema lleva estadísticas generales de todo lo que pasa y manda resúmenes periódicos, sin importar si hubo o no un patrón.
 
 ## Antes de cualquier patrón
 
@@ -31,12 +31,6 @@ Este es el único de los tres patrones que hoy realmente sugiere apuestas y mand
 Este patrón funciona con exactamente la misma lógica que el de racha de 4 — los mismos pasos: sugerir la apuesta, el segundo intento con monto más alto si se pierde, el tercer intento si también se pierde, el manejo de empates sin perder lo avanzado, el cierre como Ganada o Perdida, el aviso final y el borrado automático de los avisos intermedios. La única diferencia en la lógica es que este se cumple con 3 repeticiones seguidas en vez de 4, y si estuviera encendido, sus avisos también irían al grupo Oficial (no al de Pruebas — ese está reservado para el tercer patrón).
 
 La diferencia real, hoy, no está en la lógica sino en que **está apagado a propósito**: el sistema sigue revisando constantemente si se cumplen las 3 repeticiones seguidas, pero aunque se cumplan, nunca llega a actuar — no sugiere apuestas, no manda avisos, no hace nada de lo descrito arriba. Se decidió dejar de usarlo porque se prefirió quedarse con el de 4, pero todo el código y la lógica siguen ahí, probados, por si en algún momento se decide volver a activarlo.
-
-## El patrón que todavía se está construyendo: alternancia
-
-- Busca detectar cuando el resultado empieza a **alternar** entre los dos lados varias veces seguidas, en vez de repetirse — una idea distinta a los dos patrones anteriores.
-- Ya tiene reservado su lugar dentro del sistema, incluyendo un **grupo de Pruebas** de Telegram separado del Oficial, para que el día que empiece a funcionar, sus avisos nunca se mezclen con los avisos reales.
-- Lo que todavía falta es la lógica de detección en sí: hoy el sistema sabe que este patrón existe, pero no tiene escrita la parte que decide cuándo se cumple, así que nunca hace nada — no revisa, no sugiere, no avisa.
 
 ## Mientras tanto, en paralelo
 

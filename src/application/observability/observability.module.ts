@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { CollectorModule } from '../../infrastructure/collector/collector.module';
+import { PersistenceModule } from '../../infrastructure/persistence/persistence.module';
 import { DomainEventBusModule } from '../domain-events/domain-event-bus.module';
 import { HistoryModule } from '../history/history.module';
 import { NotificationModule } from '../notification/notification.module';
@@ -9,10 +10,13 @@ import { StrategyModule } from '../strategy/strategy.module';
 import { EngineHealth } from './engine-health';
 import { EngineMetricsService } from './engine-metrics.service';
 import { ErrorTrackingModule } from './error-tracking.module';
+import { HealthSnapshotService } from './health-snapshot.service';
 
 /**
- * Une EngineMetricsService (acumula vía eventos) y EngineHealth (consulta
- * el estado actual de los demás módulos) en un único punto de arranque.
+ * Une EngineMetricsService (acumula vía eventos), EngineHealth (consulta
+ * el estado actual de los demás módulos) y HealthSnapshotService (suma la
+ * salud de la base de datos, ver Mk-Api.md Anexo D §7) en un único punto
+ * de arranque.
  *
  * Importa CollectorModule/OperationModule/StrategyModule/NotificationModule
  * para leer lo que exportan (GameEventCollector, OperationCoordinator,
@@ -28,8 +32,9 @@ import { ErrorTrackingModule } from './error-tracking.module';
     StrategyModule,
     NotificationModule,
     ErrorTrackingModule,
+    PersistenceModule,
   ],
-  providers: [EngineMetricsService, EngineHealth],
-  exports: [EngineMetricsService, EngineHealth],
+  providers: [EngineMetricsService, EngineHealth, HealthSnapshotService],
+  exports: [EngineMetricsService, EngineHealth, HealthSnapshotService],
 })
 export class ObservabilityModule {}

@@ -12,6 +12,7 @@ import { StrategyExecutionGuard } from '../../core/strategy/interfaces/strategy-
 import { Strategy } from '../../core/strategy/interfaces/strategy.interface';
 import { StrategyResult } from '../../core/strategy/types/strategy-result.type';
 import { InMemoryStrategyRuntimeState } from './in-memory-strategy-runtime-state';
+import type { StrategyChannelRegistry } from './strategy-channel-registry';
 import { StrategyCoordinator } from './strategy.coordinator';
 
 function buildGame(uuid: string): Game {
@@ -57,6 +58,12 @@ function buildStrategy(
 
 const NO_SIGNAL: StrategyResult = { triggered: false };
 
+/** Doble mínimo de StrategyChannelRegistry para estas pruebas: solo lo que StrategyCoordinator consulta. */
+type MockConfigProvider = {
+  getMaxMartingales: jest.Mock<number, [string, number]>;
+  isActiveFor: jest.Mock<boolean, [string]>;
+};
+
 describe('StrategyCoordinator', () => {
   let historyStore: jest.Mocked<HistoryStore>;
   let domainEventBus: jest.Mocked<DomainEventBus>;
@@ -64,6 +71,7 @@ describe('StrategyCoordinator', () => {
   let errorTracker: EngineErrorTracker;
   let executionGuard: jest.Mocked<StrategyExecutionGuard>;
   let runtimeState: InMemoryStrategyRuntimeState;
+  let configProvider: MockConfigProvider;
 
   beforeEach(() => {
     jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
@@ -71,6 +79,16 @@ describe('StrategyCoordinator', () => {
     snapshot = buildSnapshot();
     executionGuard = { canExecute: jest.fn().mockReturnValue(true) };
     runtimeState = new InMemoryStrategyRuntimeState();
+    configProvider = {
+      getMaxMartingales: jest
+        .fn<number, [string, number]>()
+        .mockImplementation((_strategyId, defaultValue) => defaultValue),
+      // Por default en estas pruebas, toda estrategia está "asignada a un
+      // canal activo" — así los tests existentes (previos al gate) siguen
+      // representando el caso "ya configurado vía API". El gate en sí se
+      // prueba aparte, más abajo.
+      isActiveFor: jest.fn<boolean, [string]>().mockReturnValue(true),
+    };
 
     historyStore = {
       append: jest.fn(),
@@ -107,6 +125,7 @@ describe('StrategyCoordinator', () => {
       errorTracker,
       executionGuard,
       runtimeState,
+      configProvider as unknown as StrategyChannelRegistry,
     );
   }
 
@@ -146,6 +165,7 @@ describe('StrategyCoordinator', () => {
         historySnapshot: snapshot,
         execution: executionGuard,
         runtimeState,
+        config: configProvider,
         timestamp: expect.any(Date) as Date,
       }),
     );
@@ -192,6 +212,43 @@ describe('StrategyCoordinator', () => {
     coordinator.handle(buildGameReceivedEvent('1'));
 
     expect(disabled.evaluate).not.toHaveBeenCalled();
+  });
+
+  describe('channel assignment gate (StrategyChannelRegistry.isActiveFor)', () => {
+    it('skips a strategy that is not assigned to an active channel', () => {
+      configProvider.isActiveFor.mockReturnValue(false);
+      const strategy = buildStrategy('unassigned', NO_SIGNAL);
+      const coordinator = build([strategy]);
+
+      coordinator.handle(buildGameReceivedEvent('1'));
+
+      expect(strategy.evaluate).not.toHaveBeenCalled();
+      expect(configProvider.isActiveFor).toHaveBeenCalledWith('unassigned');
+    });
+
+    it('evaluates a strategy once it is assigned to an active channel', () => {
+      configProvider.isActiveFor.mockReturnValue(true);
+      const strategy = buildStrategy('assigned', NO_SIGNAL);
+      const coordinator = build([strategy]);
+
+      coordinator.handle(buildGameReceivedEvent('1'));
+
+      expect(strategy.evaluate).toHaveBeenCalledTimes(1);
+    });
+
+    it('checks isActiveFor independently per strategy, in the same game', () => {
+      configProvider.isActiveFor.mockImplementation(
+        (id: string) => id === 'active-one',
+      );
+      const activeOne = buildStrategy('active-one', NO_SIGNAL);
+      const inactiveOne = buildStrategy('inactive-one', NO_SIGNAL);
+      const coordinator = build([activeOne, inactiveOne]);
+
+      coordinator.handle(buildGameReceivedEvent('1'));
+
+      expect(activeOne.evaluate).toHaveBeenCalledTimes(1);
+      expect(inactiveOne.evaluate).not.toHaveBeenCalled();
+    });
   });
 
   it('publishes a StrategyTriggeredEvent only for strategies that trigger', () => {

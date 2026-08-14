@@ -20,12 +20,40 @@ async function bootstrap(): Promise<void> {
   const configService = app.get(ConfigService);
   const port = configService.get<number>('app.port', 3000);
 
+  // Prefijo fijo de toda la API propia (Mk-Api.md §17): `setGlobalPrefix`
+  // afecta a TODOS los controllers de Nest. El único endpoint administrativo
+  // hoy es `POST /api/v1/admin/reports` (dentro de `api/`, F7 completo — el
+  // legado `POST /admin/commands` con contraseña se retiró). `/healthz` (más
+  // abajo) se registra directo en el adapter de Fastify, así que nunca pasa
+  // por `setGlobalPrefix` en absoluto.
+  app.setGlobalPrefix('api/v1');
+
+  // CORS: abierto a propósito mientras el proyecto está en desarrollo y
+  // todavía no hay un dominio de frontend fijo que poner en una allowlist
+  // (decisión explícita del dueño del sistema, revierte Mk-Api.md Anexo D
+  // §6). `origin: true` refleja el header `Origin` de cada request — no es
+  // `"*"` literal, así que sigue funcionando si en algún momento se agregan
+  // credenciales/cookies, pero equivale a "cualquier origen puede llamar a
+  // la API". **Antes de producción, reemplazar por una allowlist explícita
+  // de dominios.**
+  app.enableCors({
+    origin: true,
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'X-Api-Key', 'X-Request-Id'],
+  });
+
+  // Rate limiting: diferido a cuando existan recursos reales que proteger
+  // más allá de /health (F4, Mk-Api.md §20) — hoy no hay superficie que
+  // abusar.
+
   // Shutdown hooks: ante SIGTERM/SIGINT (p. ej. Ctrl+C) NestJS ejecuta los
   // OnModuleDestroy y GameEventCollector cierra el SSE limpio.
   app.enableShutdownHooks();
 
   // Health check sin estado: útil para health-checks de plataforma y
-  // monitoreo externo. No toca la lógica del motor.
+  // monitoreo externo. No toca la lógica del motor. Coexiste con
+  // GET /api/v1/health (Mk-Api.md Anexo D §7): este es el legado, crudo y
+  // sin envelope; el otro es el contrato estable para el frontend.
   const health = app.get(EngineHealth);
   app.getHttpAdapter().get('/healthz', () => ({
     status: 'ok',

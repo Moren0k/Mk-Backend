@@ -12,10 +12,11 @@ import {
   TelegramChannel,
   TelegramChannelConfig,
 } from '../../infrastructure/telegram/telegram.channel';
-import { resolveStrategyGroup } from '../../core/strategy/strategy-group';
 import { DomainEventBusModule } from '../domain-events/domain-event-bus.module';
 import { DistributionMetricModule } from '../metrics/distribution-metric.module';
 import { ErrorTrackingModule } from '../observability/error-tracking.module';
+import { StrategyChannelRegistry } from '../strategy/strategy-channel-registry';
+import { StrategyChannelRegistryModule } from '../strategy/strategy-channel-registry.module';
 import { NotificationCoordinator } from './notification.coordinator';
 import { MessageTracker } from './message-tracker';
 
@@ -29,35 +30,55 @@ const TELEGRAM_TEST_CONFIG = Symbol('TelegramTestConfig');
  * con su propio bot/chat y su propio criterio de qué estrategias le
  * corresponden, reutilizando toda la lógica de envío/reintentos sin
  * duplicarla.
+ *
+ * `isStrategyAllowed`/`enabledWhen` consultan `StrategyChannelRegistry`
+ * (Mk-Api.md Anexo D §3) en cada llamada — no `resolveStrategyGroup`
+ * estático — porque `TelegramChannel.supports()`/`enabled()` se invocan en
+ * vivo por cada notificación (ver `notification-channel-dispatcher.ts`),
+ * así que una reasignación de canal o activar/desactivar un canal vía
+ * `PATCH /api/v1/channels/:channel` aplica de inmediato a la siguiente
+ * notificación, sin reiniciar el proceso. Ambos canales arrancan
+ * inactivos por default (2026-08-11): sin configurar nada vía API, no
+ * sale ningún mensaje.
  */
 const officialTelegramConfigProvider: Provider = {
   provide: TELEGRAM_OFFICIAL_CONFIG,
-  useFactory: (configService: ConfigService): TelegramChannelConfig => ({
+  useFactory: (
+    configService: ConfigService,
+    strategyChannelRegistry: StrategyChannelRegistry,
+  ): TelegramChannelConfig => ({
     label: 'Oficial',
     channelType: NotificationChannelType.TELEGRAM,
     botToken: configService.get<string>('telegram.botToken'),
     chatId: configService.get<string>('telegram.chatId'),
     isStrategyAllowed: (strategyId) =>
-      resolveStrategyGroup(strategyId) === 'oficial',
+      strategyChannelRegistry.isAssignedTo(strategyId, 'oficial'),
+    enabledWhen: () => strategyChannelRegistry.isActive('oficial'),
   }),
-  inject: [ConfigService],
+  inject: [ConfigService, StrategyChannelRegistry],
 };
 
 const testTelegramConfigProvider: Provider = {
   provide: TELEGRAM_TEST_CONFIG,
-  useFactory: (configService: ConfigService): TelegramChannelConfig => ({
+  useFactory: (
+    configService: ConfigService,
+    strategyChannelRegistry: StrategyChannelRegistry,
+  ): TelegramChannelConfig => ({
     label: 'Pruebas',
     channelType: NotificationChannelType.TELEGRAM_PRUEBAS,
     botToken: configService.get<string>('telegram.pruebas.botToken'),
     chatId: configService.get<string>('telegram.pruebas.chatId'),
     isStrategyAllowed: (strategyId) =>
-      resolveStrategyGroup(strategyId) === 'pruebas',
-    // TELEGRAM_PRUEBAS_ENABLED: interruptor independiente de tener
-    // token/chatId configurados (ver TelegramChannel.enabled()).
+      strategyChannelRegistry.isAssignedTo(strategyId, 'pruebas'),
+    // TELEGRAM_PRUEBAS_ENABLED (deploy-time) Y StrategyChannelRegistry
+    // (runtime, activo por canal) deben permitir el envío: el env var
+    // sigue siendo el interruptor maestro de despliegue, el registro es
+    // el control fino desde la API — y ambos arrancan restrictivos.
     enabledWhen: () =>
-      configService.get<boolean>('telegram.pruebas.enabled') ?? true,
+      (configService.get<boolean>('telegram.pruebas.enabled') ?? true) &&
+      strategyChannelRegistry.isActive('pruebas'),
   }),
-  inject: [ConfigService],
+  inject: [ConfigService, StrategyChannelRegistry],
 };
 
 const officialTelegramChannelProvider: Provider = {
@@ -93,6 +114,7 @@ const notificationChannelsProvider: Provider = {
     DomainEventBusModule,
     ErrorTrackingModule,
     DistributionMetricModule,
+    StrategyChannelRegistryModule,
   ],
   providers: [
     NotificationCoordinator,
