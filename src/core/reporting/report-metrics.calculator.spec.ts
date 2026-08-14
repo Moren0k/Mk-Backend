@@ -4,7 +4,11 @@ import { OperationClosedRecord } from './types/operation-closed-record.type';
 import { OperationOpenedRecord } from './types/operation-opened-record.type';
 
 function buildOpened(operationId: string): OperationOpenedRecord {
-  return { operationId, openedAt: new Date('2026-08-01T15:00:00.000Z') };
+  return {
+    operationId,
+    strategyId: 'streak-3',
+    openedAt: new Date('2026-08-01T15:00:00.000Z'),
+  };
 }
 
 function buildClosed(
@@ -12,6 +16,7 @@ function buildClosed(
 ): OperationClosedRecord {
   return {
     operationId: 'op-1',
+    strategyId: 'streak-3',
     openedAt: new Date('2026-08-01T15:00:00.000Z'),
     closedAt: new Date('2026-08-01T15:05:00.000Z'),
     result: OperationState.WON,

@@ -4,12 +4,14 @@ Motor de procesamiento de eventos en tiempo real que analiza las jugadas de **Ba
 
 No es un CRUD: todo el sistema gira alrededor de un único disparador — **llega una jugada nueva** — y se comunica internamente mediante un bus de eventos de dominio, sin que ningún componente conozca a otro directamente.
 
-Para el detalle completo de la arquitectura (capas, decisiones de diseño, análisis de rendimiento, formato de notificaciones) ver [`ARCHITECTURE.md`](./ARCHITECTURE.md). Para el contrato de la API de Tipminer, ver [`API.MD`](./API.MD).
+Para el detalle completo de la arquitectura (capas, decisiones de diseño, análisis de rendimiento, formato de notificaciones) ver [`ARCHITECTURE.md`](./ARCHITECTURE.md). Para el contrato de la API de Tipminer, ver [`API.md`](./API.md). Para el contrato completo de **nuestra propia API** (`src/api/`, la que consume el frontend: endpoints, auth, request/response, SSE), ver [`documentacion_mk_api.md`](./documentacion_mk_api.md).
 
 ## Qué hace
 
 1. Escucha las jugadas de BacBo en vivo (SSE) y carga un historial inicial (HTTP).
-2. Evalúa estrategias sobre ese historial — hoy, `Streak3Strategy`: cuando una racha de 3 resultados iguales (PLAYER o BANKER) aparece, recomienda apostar al resultado opuesto.
+2. Evalúa estrategias sobre ese historial:
+   - **`Streak4Strategy`** (canal oficial, activa): cuando una racha de 4 resultados iguales (PLAYER o BANKER) aparece, recomienda apostar al resultado opuesto.
+   - **`Streak3Strategy`** (registrada, desactivada): misma lógica con racha de 3. Conservada como referencia.
 3. Abre una operación simulada con hasta 2 pasos de martingala (MG1, MG2) y la sigue hasta que gana o pierde.
 4. **Notifica cada evento relevante por Telegram** con formato personalizado:
    - 🚨 Entrada con la última jugada de la racha (`streakWinner`) y la apuesta recomendada
@@ -46,13 +48,17 @@ pnpm start:dev
 | Variable | Descripción |
 |---|---|
 | `PORT` | Puerto HTTP del servidor (Fastify). Default `3000`. |
-| `ADMIN_PASSWORD` | Contraseña del endpoint `POST /admin/commands`. Se hashea al arrancar; vacía = endpoint deshabilitado. |
-| `TELEGRAM_BOT_TOKEN` | Token del bot de Telegram (se obtiene con `@BotFather`). |
-| `TELEGRAM_CHAT_ID` | Id del chat/grupo donde el bot envía las alertas. |
+| `TELEGRAM_BOT_TOKEN` | Token del bot de Telegram oficial (se obtiene con `@BotFather`). |
+| `TELEGRAM_CHAT_ID` | Id del chat/grupo oficial donde el bot envía las alertas. |
+| `TELEGRAM_PRUEBAS_BOT_TOKEN` | Token del bot de Telegram de pruebas. Recibe exclusivamente las señales de estrategias marcadas como "solo pruebas" en `strategy-group.ts` (hoy, ninguna); nunca las del canal oficial. |
+| `TELEGRAM_PRUEBAS_CHAT_ID` | Id del chat/grupo de pruebas asociado a `TELEGRAM_PRUEBAS_BOT_TOKEN`. |
+| `TELEGRAM_PRUEBAS_ENABLED` | Interruptor de modo pruebas (`true`/`false`, default `true`). En `false`, el chat de pruebas no recibe absolutamente nada (ni alertas en vivo ni resúmenes), sin pausar la evaluación interna de la estrategia. |
 | `TIPMINER_BASE_URL` | Base de la API pública de Tipminer. Trae un valor por defecto. |
 | `TIPMINER_PROVIDER_ID` | uuid de la mesa Bac Bo en Tipminer. Trae un valor por defecto. |
 | `TIPMINER_TIMEZONE` | Timezone usada al pedir el historial. Opcional. |
 | `TIPMINER_API_KEY` | Reservado para cuando la API deje de ser pública; hoy no se usa. |
+| `DATABASE_URL` | Conexión pooled (pgbouncer, puerto 6543) a PostgreSQL/Supabase. Opcional: mientras no esté definida, `PrismaService` arranca deshabilitado y el bot sigue funcionando igual, sin persistencia (ver `src/infrastructure/persistence/`). |
+| `DIRECT_URL` | Conexión session-mode (puerto 5432) a la misma base, usada únicamente por Prisma Migrate. |
 
 ### Scripts
 
@@ -63,6 +69,10 @@ pnpm start:dev
 | `pnpm start:prod` | Corre el build compilado (`node dist/main.js`). |
 | `pnpm test` | Corre la suite de tests (Jest). |
 | `pnpm lint` | ESLint + Prettier. |
+| `pnpm db:generate` | Regenera el cliente de Prisma a partir de `prisma/schema.prisma`. |
+| `pnpm db:migrate:dev` | Crea y aplica una migración en desarrollo (requiere `DATABASE_URL`/`DIRECT_URL`). |
+| `pnpm db:migrate:deploy` | Aplica migraciones pendientes en producción. |
+| `pnpm db:studio` | Abre Prisma Studio contra la base configurada. |
 
 ## Flujo del sistema
 
@@ -72,7 +82,7 @@ Tipminer (SSE/HTTP)
     ▼
 GameEventCollector → HistoryStore → GameReceivedEvent
     │
-    ├── StrategyCoordinator → Streak3Strategy → StrategyTriggeredEvent
+    ├── StrategyCoordinator → Streak4Strategy → StrategyTriggeredEvent
     │                                                        │
     │                                              (recommendedWinner + streakWinner)
     │                                                        │
@@ -104,7 +114,7 @@ src/
 │   ├── operation/          Operation (aggregate root), OperationSnapshot, OperationUpdateResult
 │   ├── shared/             round-percentage, take-last
 │   ├── statistics/         Statistics (contadores incrementales)
-│   └── strategy/           Strategy interface, Streak3Strategy, StrategySignal
+│   └── strategy/           Strategy interface, Streak3/4Strategy, StrategySignal
 ├── application/
 │   ├── history/            HistoryModule
 │   ├── metrics/            DistributionMetric, DistributionMetricModule
@@ -116,9 +126,20 @@ src/
 ├── infrastructure/
 │   ├── collector/          GameEventCollector, SSE client, GameMapper
 │   ├── config/             AppConfigModule
+│   ├── persistence/        PrismaService, PersistenceModule (PostgreSQL/Supabase, tabla `jugadas`)
 │   ├── shared/             sleep utility
 │   └── telegram/           TelegramChannel, MarkdownV2 escaping, retry constants
 └── e2e/                    Test end-to-end del pipeline completo
 ```
+
+## Base de datos
+
+`prisma/schema.prisma` define la conexión a PostgreSQL/Supabase y el modelo `Jugada`
+(tabla `jugadas`): el historial real de rondas de BacBo, fuente de verdad para el
+futuro motor de análisis de patrones. Cómo conectarse (código, `psql`, Prisma Studio,
+panel de Supabase), el esquema completo y las decisiones de diseño están en
+[`DATABASE.md`](./DATABASE.md).
+
+![Diagrama de la tabla jugadas](docs/Database.png)
 
 Detalle completo de capas, eventos, módulos NestJS y decisiones de diseño en [`ARCHITECTURE.md`](./ARCHITECTURE.md).

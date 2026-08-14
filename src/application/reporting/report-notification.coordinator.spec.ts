@@ -18,6 +18,7 @@ function buildReport(overrides: Partial<ReportSnapshot> = {}): ReportSnapshot {
   return {
     windowFrom: new Date('2026-08-01T15:00:00.000Z'),
     windowTo: new Date('2026-08-01T16:00:00.000Z'),
+    group: 'oficial',
     metrics: {
       alertsSent: 1,
       closedOperations: 1,
@@ -59,6 +60,17 @@ function buildChannel(
     send: jest.fn().mockResolvedValue(true),
     ...overrides,
   };
+}
+
+function buildTestChannel(
+  overrides: Partial<NotificationChannel> = {},
+): jest.Mocked<NotificationChannel> {
+  return buildChannel({
+    getChannelType: jest
+      .fn()
+      .mockReturnValue(NotificationChannelType.TELEGRAM_PRUEBAS),
+    ...overrides,
+  });
 }
 
 describe('ReportNotificationCoordinator', () => {
@@ -169,7 +181,7 @@ describe('ReportNotificationCoordinator', () => {
     expect(channel.send).not.toHaveBeenCalled();
   });
 
-  it('dispatches independently to every registered channel', () => {
+  it('dispatches independently to every registered official channel', () => {
     const telegram = buildChannel();
     const other = buildChannel();
     const coordinator = build([telegram, other]);
@@ -182,5 +194,35 @@ describe('ReportNotificationCoordinator', () => {
 
     expect(telegram.send).toHaveBeenCalledTimes(1);
     expect(other.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes a report with group "oficial" only to the official channel', () => {
+    const official = buildChannel();
+    const test = buildTestChannel();
+    const coordinator = build([official, test]);
+
+    dispatchEvent(
+      coordinator,
+      HourlyReportGeneratedEvent.eventName,
+      buildReport({ group: 'oficial' }),
+    );
+
+    expect(official.send).toHaveBeenCalledTimes(1);
+    expect(test.send).not.toHaveBeenCalled();
+  });
+
+  it('routes a report with group "pruebas" only to the test channel', () => {
+    const official = buildChannel();
+    const test = buildTestChannel();
+    const coordinator = build([official, test]);
+
+    dispatchEvent(
+      coordinator,
+      HourlyReportGeneratedEvent.eventName,
+      buildReport({ group: 'pruebas' }),
+    );
+
+    expect(test.send).toHaveBeenCalledTimes(1);
+    expect(official.send).not.toHaveBeenCalled();
   });
 });

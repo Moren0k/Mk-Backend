@@ -7,7 +7,11 @@ function buildOpened(
   operationId: string,
   openedAt: string,
 ): OperationOpenedRecord {
-  return { operationId, openedAt: new Date(openedAt) };
+  return {
+    operationId,
+    strategyId: 'streak-3',
+    openedAt: new Date(openedAt),
+  };
 }
 
 function buildClosed(
@@ -17,6 +21,7 @@ function buildClosed(
 ): OperationClosedRecord {
   return {
     operationId,
+    strategyId: 'streak-3',
     openedAt: new Date(closedAt),
     closedAt: new Date(closedAt),
     result: OperationState.WON,

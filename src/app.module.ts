@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 
+import { ApiModule } from './api/api.module';
 import { AppConfigModule } from './infrastructure/config/app-config.module';
-import { AdminModule } from './application/admin/admin.module';
 import { HistoryModule } from './application/history/history.module';
 import { StrategyModule } from './application/strategy/strategy.module';
 import { OperationModule } from './application/operation/operation.module';
@@ -9,6 +9,7 @@ import { NotificationModule } from './application/notification/notification.modu
 import { StatisticsModule } from './application/statistics/statistics.module';
 import { ObservabilityModule } from './application/observability/observability.module';
 import { ReportingModule } from './application/reporting/reporting.module';
+import { PersistenceModule } from './infrastructure/persistence/persistence.module';
 
 /**
  * Composition root: aquí se conectan infrastructure y application.
@@ -45,7 +46,8 @@ import { ReportingModule } from './application/reporting/reporting.module';
     StatisticsModule,
     ObservabilityModule,
     ReportingModule,
-    AdminModule,
+    PersistenceModule,
+    ApiModule,
   ],
 })
 export class AppModule {}

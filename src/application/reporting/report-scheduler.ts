@@ -12,6 +12,7 @@ import {
 } from '../../core/constants/injection-tokens.constants';
 import { HourlyReportGeneratedEvent } from '../../core/domain-events/reporting/hourly-report-generated.event';
 import type { DomainEventBus } from '../../core/domain-events/base/domain-event-bus.interface';
+import { buildGroupMetrics } from '../../core/reporting/build-group-metrics';
 import { calculateReportMetrics } from '../../core/reporting/report-metrics.calculator';
 import {
   getNextHourBoundary,
@@ -20,6 +21,15 @@ import {
 import { ONE_HOUR_MS } from '../../core/reporting/reporting.constants';
 import type { OperationReportStore } from '../../core/reporting/interfaces/operation-report-store.interface';
 import { ReportSnapshot } from '../../core/reporting/types/report-snapshot.type';
+import { StrategyGroup } from '../../core/strategy/strategy-group';
+
+/**
+ * Grupos para los que se genera y publica un reporte horario automático de
+ * forma independiente. Agregar un grupo nuevo aquí es el único cambio
+ * necesario para que el scheduler también lo cubra (ver
+ * ReportNotificationCoordinator, que enruta cada evento según su `group`).
+ */
+const HOURLY_REPORT_GROUPS: readonly StrategyGroup[] = ['oficial', 'pruebas'];
 
 /**
  * Dispara el reporte horario exactamente en las horas de reloj que
@@ -34,6 +44,11 @@ import { ReportSnapshot } from '../../core/reporting/types/report-snapshot.type'
  * OperationReportStore, calcula las métricas y publica el evento de
  * dominio correspondiente. ReportNotificationCoordinator es quien convierte
  * eso en una notificación real.
+ *
+ * Genera un reporte horario independiente por cada grupo en
+ * HOURLY_REPORT_GROUPS: oficial y pruebas nunca comparten un mismo evento
+ * ni un mismo cálculo (ver buildGroupMetrics), aunque ambos se disparen en
+ * el mismo tick de reloj.
  */
 @Injectable()
 export class ReportScheduler implements OnModuleInit, OnModuleDestroy {
@@ -77,17 +92,32 @@ export class ReportScheduler implements OnModuleInit, OnModuleDestroy {
     this.publishReport(hourStart, hourEnd);
   }
 
+  /**
+   * Lee los registros de la ventana una sola vez (sin filtrar) y publica un
+   * ReportSnapshot por grupo, cada uno con sus propios registros filtrados
+   * y sus propias métricas (ver buildGroupMetrics) — así oficial y pruebas
+   * nunca se mezclan en un mismo reporte.
+   */
   private publishReport(from: Date, to: Date): void {
     const opened = this.store.getOpenedBetween(from, to);
     const closed = this.store.getClosedBetween(from, to);
-    const metrics = calculateReportMetrics(opened, closed);
 
-    const snapshot: ReportSnapshot = Object.freeze({
-      windowFrom: from,
-      windowTo: to,
-      metrics,
-    });
+    for (const group of HOURLY_REPORT_GROUPS) {
+      const metrics = buildGroupMetrics(
+        opened,
+        closed,
+        group,
+        calculateReportMetrics,
+      );
 
-    this.domainEventBus.publish(new HourlyReportGeneratedEvent(snapshot));
+      const snapshot: ReportSnapshot = Object.freeze({
+        windowFrom: from,
+        windowTo: to,
+        group,
+        metrics,
+      });
+
+      this.domainEventBus.publish(new HourlyReportGeneratedEvent(snapshot));
+    }
   }
 }

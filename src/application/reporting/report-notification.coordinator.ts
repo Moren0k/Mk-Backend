@@ -17,6 +17,7 @@ import { NotificationFactory } from '../../core/notification/notification.factor
 import { EngineErrorTracker } from '../../core/observability/engine-error-tracker';
 import { ReportSnapshot } from '../../core/reporting/types/report-snapshot.type';
 import { NotificationChannelDispatcher } from '../notification/notification-channel-dispatcher';
+import { selectChannelsByGroup } from '../notification/notification-channel-selector';
 
 /**
  * Escucha HourlyReportGeneratedEvent, construye la Notification
@@ -27,12 +28,21 @@ import { NotificationChannelDispatcher } from '../notification/notification-chan
  * familia de eventos distinta (reportes agregados, no eventos de una
  * Operation puntual): mismo principio de responsabilidad única que separa
  * StrategyCoordinator de OperationCoordinator.
+ *
+ * ReportScheduler publica un evento por grupo (oficial y pruebas, cada uno
+ * ya filtrado): el destino se elige de forma explícita por evento con
+ * `selectChannelsByGroup(..., report.group)` y `dispatchTo`, en vez de
+ * `dispatchToAll`/`supports()`. Antes dependía de que la Notification
+ * llevara `metadata` vacía para que el canal de pruebas la descartara "por
+ * casualidad" — una regla de negocio no debe depender de un efecto
+ * colateral.
  */
 @Injectable()
 export class ReportNotificationCoordinator
   implements OnModuleInit, OnModuleDestroy
 {
   private readonly channelDispatcher: NotificationChannelDispatcher;
+  private readonly channels: readonly NotificationChannel[];
 
   private readonly hourlyHandler: DomainEventHandler<HourlyReportGeneratedEvent> =
     {
@@ -51,6 +61,7 @@ export class ReportNotificationCoordinator
       channels,
       errorTracker,
     );
+    this.channels = channels;
   }
 
   onModuleInit(): void {
@@ -68,7 +79,9 @@ export class ReportNotificationCoordinator
   }
 
   private dispatch(report: ReportSnapshot): void {
-    this.channelDispatcher.dispatchToAll((channelType) =>
+    const targetChannels = selectChannelsByGroup(this.channels, report.group);
+
+    this.channelDispatcher.dispatchTo(targetChannels, (channelType) =>
       this.notificationFactory.createForHourlyReport(report, channelType),
     );
   }

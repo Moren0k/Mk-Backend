@@ -210,4 +210,51 @@ describe('NotificationChannelDispatcher', () => {
 
     expect(() => dispatcher.dispatchToAll(buildNotification)).not.toThrow();
   });
+
+  describe('dispatchTo', () => {
+    it('sends to the given channels regardless of supports(), unlike dispatchToAll', () => {
+      const rejecting = buildChannel({
+        supports: jest.fn().mockReturnValue(false),
+      });
+      const dispatcher = new NotificationChannelDispatcher(
+        domainEventBus,
+        [rejecting],
+        errorTracker,
+      );
+
+      dispatcher.dispatchTo([rejecting], buildNotification);
+
+      expect(rejecting.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('only considers the explicit channel list, not the full channel set passed to the constructor', () => {
+      const included = buildChannel();
+      const excluded = buildChannel();
+      const dispatcher = new NotificationChannelDispatcher(
+        domainEventBus,
+        [included, excluded],
+        errorTracker,
+      );
+
+      dispatcher.dispatchTo([included], buildNotification);
+
+      expect(included.send).toHaveBeenCalledTimes(1);
+      expect(excluded.send).not.toHaveBeenCalled();
+    });
+
+    it('still skips a disabled channel', () => {
+      const channel = buildChannel({
+        enabled: jest.fn().mockReturnValue(false),
+      });
+      const dispatcher = new NotificationChannelDispatcher(
+        domainEventBus,
+        [channel],
+        errorTracker,
+      );
+
+      dispatcher.dispatchTo([channel], buildNotification);
+
+      expect(channel.send).not.toHaveBeenCalled();
+    });
+  });
 });

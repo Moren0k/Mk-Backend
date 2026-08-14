@@ -82,6 +82,17 @@ describe('ActiveOperationRegistry', () => {
     expect(registry.getAll()).toHaveLength(2);
   });
 
+  it('getById finds a registered operation by its operationId', () => {
+    const operation = Operation.open(buildSignal({ strategyId: 'streak-3' }));
+    registry.register(operation);
+
+    expect(registry.getById(operation.operationId)).toBe(operation);
+  });
+
+  it('getById returns undefined for an unknown or unregistered operationId', () => {
+    expect(registry.getById('does-not-exist')).toBeUndefined();
+  });
+
   it('size reflects the number of registered operations', () => {
     registry.register(Operation.open(buildSignal({ strategyId: 'a' })));
     registry.register(Operation.open(buildSignal({ strategyId: 'b' })));

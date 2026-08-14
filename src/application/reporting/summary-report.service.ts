@@ -9,10 +9,29 @@ import type { DomainEventBus } from '../../core/domain-events/base/domain-event-
 import type { NotificationChannel } from '../../core/interfaces/notification-channel.interface';
 import { NotificationFactory } from '../../core/notification/notification.factory';
 import { EngineErrorTracker } from '../../core/observability/engine-error-tracker';
+import { buildGroupMetrics } from '../../core/reporting/build-group-metrics';
 import type { OperationReportStore } from '../../core/reporting/interfaces/operation-report-store.interface';
 import { calculateSummaryMetrics } from '../../core/reporting/summary-metrics.calculator';
-import { SummaryMetricsSnapshot } from '../../core/reporting/types/summary-metrics-snapshot.type';
+import { SummaryReportResult } from '../../core/reporting/types/summary-report-result.type';
+import { StrategyGroup } from '../../core/strategy/strategy-group';
 import { NotificationChannelDispatcher } from '../notification/notification-channel-dispatcher';
+import { selectChannelsByGroup } from '../notification/notification-channel-selector';
+
+/**
+ * A qué destino(s) enviar el resumen, elegido explícitamente por quien pide
+ * el reporte (ver AdminController): a diferencia del resto de
+ * notificaciones, el resumen no está atado a ninguna estrategia, así que su
+ * destino no se decide por `channel.supports()` sino por este selector.
+ */
+export type SummaryReportChannelSelector = 'oficial' | 'pruebas' | 'todos';
+
+const GROUPS_BY_SELECTOR: Readonly<
+  Record<SummaryReportChannelSelector, readonly StrategyGroup[]>
+> = {
+  oficial: ['oficial'],
+  pruebas: ['pruebas'],
+  todos: ['oficial', 'pruebas'],
+};
 
 /**
  * Genera y despacha el resumen completo del historial en memoria
@@ -24,6 +43,12 @@ import { NotificationChannelDispatcher } from '../notification/notification-chan
  * construye su propio NotificationChannelDispatcher (mismo patrón que
  * ambos) para no acoplar el flujo bajo demanda al flujo automático del
  * reporte horario.
+ *
+ * Oficial y pruebas nunca comparten un mismo mensaje: se calculan dos
+ * SummaryMetricsSnapshot independientes (filtrando los registros por
+ * grupo antes de calcular) y cada uno se despacha únicamente al chat que le
+ * corresponde, incluso cuando el selector es "todos" (dos mensajes
+ * distintos, uno por chat, nunca uno combinado).
  */
 @Injectable()
 export class SummaryReportService {
@@ -35,7 +60,7 @@ export class SummaryReportService {
     private readonly store: OperationReportStore,
     @Inject(DOMAIN_EVENT_BUS) domainEventBus: DomainEventBus,
     @Inject(NOTIFICATION_CHANNELS)
-    channels: readonly NotificationChannel[],
+    private readonly channels: readonly NotificationChannel[],
     private readonly notificationFactory: NotificationFactory,
     errorTracker: EngineErrorTracker,
   ) {
@@ -46,25 +71,46 @@ export class SummaryReportService {
     );
   }
 
-  generateAndDispatch(): SummaryMetricsSnapshot {
-    const now = new Date();
+  /**
+   * Variante de solo lectura de `generateAndDispatch`: mismo cálculo
+   * (oficial + pruebas, nunca mezclados), pero sin tocar
+   * `NotificationChannelDispatcher` — pensada para que un `GET` bajo
+   * demanda (dashboard del frontend, sondeado con frecuencia) pueda leer
+   * won/lost/alertsSent/uptimeMs sin disparar un mensaje de Telegram en
+   * cada llamada.
+   */
+  getSnapshot(now: Date = new Date()): SummaryReportResult {
     const opened = this.store.getAllOpened();
     const closed = this.store.getAllClosed();
-    const metrics = calculateSummaryMetrics(
-      opened,
-      closed,
-      this.processStartedAt,
-      now,
-    );
 
-    this.channelDispatcher.dispatchToAll((channelType) =>
-      this.notificationFactory.createForSummaryReport(
-        metrics,
-        now,
-        channelType,
+    return {
+      oficial: buildGroupMetrics(opened, closed, 'oficial', (o, c) =>
+        calculateSummaryMetrics(o, c, this.processStartedAt, now),
       ),
-    );
+      pruebas: buildGroupMetrics(opened, closed, 'pruebas', (o, c) =>
+        calculateSummaryMetrics(o, c, this.processStartedAt, now),
+      ),
+    };
+  }
 
-    return metrics;
+  generateAndDispatch(
+    channelSelector: SummaryReportChannelSelector = 'todos',
+  ): SummaryReportResult {
+    const now = new Date();
+    const result = this.getSnapshot(now);
+
+    for (const group of GROUPS_BY_SELECTOR[channelSelector]) {
+      this.channelDispatcher.dispatchTo(
+        selectChannelsByGroup(this.channels, group),
+        (channelType) =>
+          this.notificationFactory.createForSummaryReport(
+            result[group],
+            now,
+            channelType,
+          ),
+      );
+    }
+
+    return result;
   }
 }

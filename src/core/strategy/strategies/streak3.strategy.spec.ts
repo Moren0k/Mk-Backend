@@ -1,6 +1,7 @@
 import { WinnerType } from '../../enums/winner-type.enum';
 import { Game } from '../../history/game.type';
 import { InMemoryHistorySnapshot } from '../../history/in-memory-history-snapshot';
+import { StrategyConfigProvider } from '../interfaces/strategy-config-provider.interface';
 import { StrategyExecutionGuard } from '../interfaces/strategy-execution-guard.interface';
 import { StrategyRuntimeState } from '../interfaces/strategy-runtime-state.interface';
 import { createStrategyContext } from '../types/strategy-context.type';
@@ -32,11 +33,22 @@ function buildRuntimeState(): StrategyRuntimeState {
   };
 }
 
+/** Pass-through por default: siempre devuelve el default de la propia Strategy. */
+function buildConfigProvider(
+  maxMartingalesOverride?: number,
+): StrategyConfigProvider {
+  return {
+    getMaxMartingales: (_strategyId, defaultValue) =>
+      maxMartingalesOverride ?? defaultValue,
+  };
+}
+
 function buildContext(
   games: ReadonlyArray<Game>,
   overrides: {
     execution?: StrategyExecutionGuard;
     runtimeState?: StrategyRuntimeState;
+    config?: StrategyConfigProvider;
   } = {},
 ) {
   const currentGame = games[games.length - 1];
@@ -46,6 +58,7 @@ function buildContext(
     snapshot,
     overrides.execution ?? buildExecutionGuard(),
     overrides.runtimeState ?? buildRuntimeState(),
+    overrides.config ?? buildConfigProvider(),
     new Date('2026-08-01T00:05:00.000Z'),
   );
 }
@@ -57,7 +70,7 @@ describe('Streak3Strategy', () => {
     strategy = new Streak3Strategy();
   });
 
-  it('is enabled by default', () => {
+  it('is enabled by default — whether it actually runs depends on StrategyChannelRegistry, not on this flag', () => {
     expect(strategy.enabled()).toBe(true);
   });
 

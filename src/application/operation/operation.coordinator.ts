@@ -13,6 +13,7 @@ import type { DomainEventHandler } from '../../core/domain-events/base/domain-ev
 import { GameReceivedEvent } from '../../core/domain-events/game/game-received.event';
 import { MartingaleOneReachedEvent } from '../../core/domain-events/operation/martingale-one-reached.event';
 import { MartingaleTwoReachedEvent } from '../../core/domain-events/operation/martingale-two-reached.event';
+import { OperationCancelledEvent } from '../../core/domain-events/operation/operation-cancelled.event';
 import { OperationLostEvent } from '../../core/domain-events/operation/operation-lost.event';
 import { OperationOpenedEvent } from '../../core/domain-events/operation/operation-opened.event';
 import { OperationTieOccurredEvent } from '../../core/domain-events/operation/operation-tie-occurred.event';
@@ -27,9 +28,9 @@ import { ActiveOperationRegistry } from './active-operation-registry';
 
 /**
  * Qué evento publicar según el estado al que acaba de llegar una Operation.
- * OPEN nunca aparece aquí (se publica aparte, al crear la operación) y
- * CANCELLED tampoco (nada lo produce todavía). Una tabla en vez de un
- * if/switch: agregar un estado nuevo no toca el resto del coordinador.
+ * OPEN nunca aparece aquí (se publica aparte, al crear la operación). Una
+ * tabla en vez de un if/switch: agregar un estado nuevo no toca el resto
+ * del coordinador.
  */
 const EVENT_FACTORY_BY_STATE: Readonly<
   Partial<Record<OperationState, (snapshot: OperationSnapshot) => DomainEvent>>
@@ -40,6 +41,8 @@ const EVENT_FACTORY_BY_STATE: Readonly<
     new MartingaleTwoReachedEvent(snapshot),
   [OperationState.WON]: (snapshot) => new OperationWonEvent(snapshot),
   [OperationState.LOST]: (snapshot) => new OperationLostEvent(snapshot),
+  [OperationState.CANCELLED]: (snapshot) =>
+    new OperationCancelledEvent(snapshot),
 };
 
 /**
@@ -101,6 +104,43 @@ export class OperationCoordinator implements OnModuleInit, OnModuleDestroy {
   /** Cuántas operaciones siguen activas. Pensado para tests/inspección. */
   activeCount(): number {
     return this.registry.size();
+  }
+
+  /**
+   * Snapshots de todas las operaciones activas, sin importar su
+   * estrategia/canal. Solo lectura: pensado para read-models de la API
+   * (Mk-Api.md §5.3 — el controller nunca inyecta `OperationCoordinator`
+   * directo, siempre a través de un read-model de `application/`).
+   */
+  getActiveSnapshots(): ReadonlyArray<OperationSnapshot> {
+    return this.registry.getAll().map((operation) => operation.toSnapshot());
+  }
+
+  /**
+   * Cancela una operación activa por comando explícito (Mk-Api.md Anexo D
+   * §4, caso de uso invocado desde `POST /api/v1/operations/:id/cancel`).
+   * Devuelve `undefined` si `operationId` no corresponde a ninguna
+   * operación activa (ya se resolvió sola o nunca existió) — quien llama
+   * decide si eso es un 404.
+   */
+  cancel(operationId: string, reason: string): OperationSnapshot | undefined {
+    const operation = this.registry.getById(operationId);
+
+    if (!operation) {
+      return undefined;
+    }
+
+    const result = operation.cancel(reason);
+
+    if (result.stateChanged) {
+      this.publishTransitionEvent(result);
+    }
+
+    if (result.completed) {
+      this.registry.unregister(operationId);
+    }
+
+    return result.snapshot;
   }
 
   private onStrategyTriggered(event: StrategyTriggeredEvent): void {

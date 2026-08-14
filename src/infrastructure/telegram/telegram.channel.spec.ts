@@ -1,4 +1,3 @@
-import { ConfigService } from '@nestjs/config';
 import { Logger } from '@nestjs/common';
 
 import { NotificationChannelType } from '../../core/enums/notification-channel-type.enum';
@@ -7,7 +6,7 @@ import {
   createNotification,
   Notification,
 } from '../../core/notification/notification.type';
-import { TelegramChannel } from './telegram.channel';
+import { TelegramChannel, TelegramChannelConfig } from './telegram.channel';
 import { MAX_SEND_ATTEMPTS, RETRY_DELAY_MS } from './telegram-retry.constants';
 
 function buildNotification(
@@ -24,19 +23,17 @@ function buildNotification(
   };
 }
 
-function buildConfigService(
-  overrides: { botToken?: string; chatId?: string } = {},
-): ConfigService {
-  const values: Record<string, string | undefined> = {
-    'telegram.botToken':
-      'botToken' in overrides ? overrides.botToken : 'test-bot-token',
-    'telegram.chatId':
-      'chatId' in overrides ? overrides.chatId : 'test-chat-id',
-  };
-
+function buildConfig(
+  overrides: Partial<TelegramChannelConfig> = {},
+): TelegramChannelConfig {
   return {
-    get: jest.fn((key: string) => values[key]),
-  } as unknown as ConfigService;
+    label: 'Oficial',
+    channelType: NotificationChannelType.TELEGRAM,
+    botToken: 'test-bot-token',
+    chatId: 'test-chat-id',
+    isStrategyAllowed: () => true,
+    ...overrides,
+  };
 }
 
 describe('TelegramChannel', () => {
@@ -56,29 +53,72 @@ describe('TelegramChannel', () => {
     jest.restoreAllMocks();
   });
 
-  it('reports its channel type and name', () => {
-    const channel = new TelegramChannel(buildConfigService());
+  it('reports its channel type and a name that includes its label', () => {
+    const channel = new TelegramChannel(buildConfig({ label: 'Oficial' }));
 
     expect(channel.getChannelType()).toBe(NotificationChannelType.TELEGRAM);
-    expect(channel.name()).toBe('Telegram');
+    expect(channel.name()).toBe('Telegram (Oficial)');
+  });
+
+  it('reports a distinct channel type when configured for pruebas', () => {
+    const channel = new TelegramChannel(
+      buildConfig({
+        label: 'Pruebas',
+        channelType: NotificationChannelType.TELEGRAM_PRUEBAS,
+      }),
+    );
+
+    expect(channel.getChannelType()).toBe(
+      NotificationChannelType.TELEGRAM_PRUEBAS,
+    );
   });
 
   it('is enabled only when both botToken and chatId are configured', () => {
-    expect(new TelegramChannel(buildConfigService()).enabled()).toBe(true);
+    expect(new TelegramChannel(buildConfig()).enabled()).toBe(true);
     expect(
-      new TelegramChannel(
-        buildConfigService({ botToken: undefined }),
-      ).enabled(),
+      new TelegramChannel(buildConfig({ botToken: undefined })).enabled(),
     ).toBe(false);
     expect(
-      new TelegramChannel(buildConfigService({ chatId: undefined })).enabled(),
+      new TelegramChannel(buildConfig({ chatId: undefined })).enabled(),
     ).toBe(false);
   });
 
-  it('supports any notification', () => {
-    const channel = new TelegramChannel(buildConfigService());
+  it('is enabled without enabledWhen configured (defaults to true)', () => {
+    expect(new TelegramChannel(buildConfig()).enabled()).toBe(true);
+  });
 
-    expect(channel.supports(buildNotification())).toBe(true);
+  it('is disabled when enabledWhen returns false, even with valid token/chatId', () => {
+    const channel = new TelegramChannel(
+      buildConfig({ enabledWhen: () => false }),
+    );
+
+    expect(channel.enabled()).toBe(false);
+  });
+
+  it('stays disabled when token/chatId are missing, even if enabledWhen returns true', () => {
+    const channel = new TelegramChannel(
+      buildConfig({ botToken: undefined, enabledWhen: () => true }),
+    );
+
+    expect(channel.enabled()).toBe(false);
+  });
+
+  it('supports a notification only when isStrategyAllowed says so', () => {
+    const channel = new TelegramChannel(
+      buildConfig({ isStrategyAllowed: (id) => id === 'streak-3' }),
+    );
+
+    expect(
+      channel.supports(
+        buildNotification({ metadata: { strategyId: 'streak-3' } }),
+      ),
+    ).toBe(true);
+    expect(
+      channel.supports(
+        buildNotification({ metadata: { strategyId: 'streak-4' } }),
+      ),
+    ).toBe(false);
+    expect(channel.supports(buildNotification({ metadata: {} }))).toBe(false);
   });
 
   it('sends a POST to sendMessage and returns SendResult with messageId', async () => {
@@ -88,7 +128,7 @@ describe('TelegramChannel', () => {
       json: jest.fn().mockResolvedValue({ result: { message_id: 456 } }),
     });
     const channel = new TelegramChannel(
-      buildConfigService({ botToken: 'ABC123', chatId: '-999' }),
+      buildConfig({ botToken: 'ABC123', chatId: '-999' }),
     );
 
     const result = await channel.send(
@@ -124,7 +164,7 @@ describe('TelegramChannel', () => {
       status: 500,
       text: jest.fn().mockResolvedValue('{"description":"boom"}'),
     });
-    const channel = new TelegramChannel(buildConfigService());
+    const channel = new TelegramChannel(buildConfig());
 
     const sendPromise = channel.send(buildNotification());
     await jest.advanceTimersByTimeAsync(RETRY_DELAY_MS * MAX_SEND_ATTEMPTS);
@@ -145,7 +185,7 @@ describe('TelegramChannel', () => {
           '{"ok":false,"error_code":400,"description":"Bad Request: can\'t parse entities"}',
         ),
     });
-    const channel = new TelegramChannel(buildConfigService());
+    const channel = new TelegramChannel(buildConfig());
 
     const sendPromise = channel.send(buildNotification());
     await jest.advanceTimersByTimeAsync(RETRY_DELAY_MS * MAX_SEND_ATTEMPTS);
@@ -171,7 +211,7 @@ describe('TelegramChannel', () => {
         status: 200,
         json: jest.fn().mockResolvedValue({ result: { message_id: 1 } }),
       });
-    const channel = new TelegramChannel(buildConfigService());
+    const channel = new TelegramChannel(buildConfig());
 
     const sendPromise = channel.send(buildNotification());
     await jest.advanceTimersByTimeAsync(RETRY_DELAY_MS);
@@ -184,7 +224,7 @@ describe('TelegramChannel', () => {
 
   it('never throws, even if fetch itself rejects on every attempt', async () => {
     fetchMock.mockRejectedValue(new Error('network down'));
-    const channel = new TelegramChannel(buildConfigService());
+    const channel = new TelegramChannel(buildConfig());
 
     const sendPromise = channel.send(buildNotification());
     await jest.advanceTimersByTimeAsync(RETRY_DELAY_MS * MAX_SEND_ATTEMPTS);
@@ -196,7 +236,7 @@ describe('TelegramChannel', () => {
   it('deletes a message via deleteMessage endpoint', async () => {
     fetchMock.mockResolvedValue({ ok: true, status: 200 });
     const channel = new TelegramChannel(
-      buildConfigService({ botToken: 'ABC123', chatId: '-999' }),
+      buildConfig({ botToken: 'ABC123', chatId: '-999' }),
     );
 
     const deleted = await channel.deleteMessage(456);
@@ -217,7 +257,7 @@ describe('TelegramChannel', () => {
 
   it('returns false when deleteMessage fails', async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 400 });
-    const channel = new TelegramChannel(buildConfigService());
+    const channel = new TelegramChannel(buildConfig());
 
     const deleted = await channel.deleteMessage(456);
 
@@ -226,7 +266,7 @@ describe('TelegramChannel', () => {
 
   it('logs a warning and returns false when deleteMessage throws', async () => {
     fetchMock.mockRejectedValue(new Error('network down'));
-    const channel = new TelegramChannel(buildConfigService());
+    const channel = new TelegramChannel(buildConfig());
 
     const deleted = await channel.deleteMessage(456);
 

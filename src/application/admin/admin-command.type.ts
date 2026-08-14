@@ -1,9 +1,13 @@
-/** Comandos administrativos soportados hoy. Solo RESUMEN existe por ahora. */
-export const AdminCommand = {
-  RESUMEN: 'RESUMEN',
+/**
+ * Destino de las notificaciones que dispara `POST /api/v1/admin/reports`
+ * (comando RESUMEN). Default "todos" si el cliente no lo especifica (ver
+ * `api/resources/admin/admin.controller.ts`).
+ */
+export const AdminNotificationChannel = {
+  OFICIAL: 'oficial',
+  PRUEBAS: 'pruebas',
+  TODOS: 'todos',
 } as const;
 
-export type AdminCommandRequest = {
-  readonly password?: string;
-  readonly command?: string;
-};
+export type AdminNotificationChannel =
+  (typeof AdminNotificationChannel)[keyof typeof AdminNotificationChannel];

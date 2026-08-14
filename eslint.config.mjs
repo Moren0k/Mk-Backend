@@ -40,4 +40,24 @@ export default tseslint.config(
       '@typescript-eslint/unbound-method': 'off',
     },
   },
+  {
+    // Mk-Api.md §3.1/§5.1: api/ depende solo de application/ y core/, nunca
+    // de infrastructure/ (Tipminer, Telegram, Prisma). Única regla de
+    // fronteras entre capas verificada por CI en todo el repo hasta ahora.
+    files: ['src/api/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/infrastructure/**'],
+              message:
+                'api/ nunca importa infrastructure/ (Mk-Api.md §3.1). Usa un servicio de application/ en su lugar.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 );

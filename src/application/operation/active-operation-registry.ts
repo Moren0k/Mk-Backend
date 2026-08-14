@@ -56,6 +56,11 @@ export class ActiveOperationRegistry implements StrategyExecutionGuard {
     return Array.from(this.operations.values());
   }
 
+  /** Localiza una operación activa puntual (p. ej. para cancelarla, Anexo D §4). */
+  getById(operationId: string): Operation | undefined {
+    return this.operations.get(operationId);
+  }
+
   size(): number {
     return this.operations.size;
   }

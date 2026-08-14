@@ -1,6 +1,6 @@
 # Arquitectura — Motor de Análisis BacBo
 
-> Refleja el estado real del código al cierre de la Etapa 9 (notificaciones personalizadas, distribución de porcentajes, empates visibles, streakWinner, borrado de mensajes intermedios). Fuente de verdad conceptual: `INIT.md`. Este documento describe la implementación concreta.
+> Refleja el estado real del código: solo `Streak3Strategy` y `Streak4Strategy` están registradas. Fuente de verdad conceptual: `INIT.md`. Este documento describe la implementación concreta.
 
 ---
 
@@ -29,8 +29,7 @@ StrategyCoordinator                       OperationCoordinator  StatisticsServic
 (ignora si isHistorical===true)             (actualiza activas)  (cuenta TODO,     (cuenta TODO,
         │                                                        incl. historial)  incl. historial)
         ▼
-   Streak3Strategy.evaluate(context)
-        │ (si detecta racha de 3, y la partida NO es histórica)
+   Streak4Strategy.evaluate(context)     ← canal oficial (racha-4)
         ▼
    StrategyTriggeredEvent { recommendedWinner, streakWinner }
         │
@@ -81,11 +80,14 @@ StrategyCoordinator                       OperationCoordinator  StatisticsServic
 
 | Capa | Regla | Ejemplos |
 |---|---|---|
-| `core/` | TypeScript puro. Nunca importa `@nestjs/*`. Nunca importa de `application/` ni `infrastructure/`. | `Operation`, `Streak3Strategy`, `InMemoryHistoryStore`, `InMemoryDomainEventBus`, `Statistics`, `EngineMetrics`, `EngineErrorTracker`, todos los `DomainEvent`, `DistributionMetricValue`, `SendResult`, `MessageType` |
+| `core/` | TypeScript puro. Nunca importa `@nestjs/*`. Nunca importa de `application/` ni `infrastructure/`. | `Operation`, `Streak3Strategy`, `Streak4Strategy`, `InMemoryHistoryStore`, `InMemoryDomainEventBus`, `Statistics`, `EngineMetrics`, `EngineErrorTracker`, todos los `DomainEvent`, `DistributionMetricValue`, `SendResult`, `MessageType` |
 | `application/` | Orquesta. Puede depender de `core`. Nunca de `infrastructure`. | `StrategyCoordinator`, `OperationCoordinator`, `NotificationCoordinator`, `StatisticsService`, `EngineMetricsService`, `EngineHealth`, `DistributionMetric`, `MessageTracker`, `NotificationChannelDispatcher` |
 | `infrastructure/` | Integraciones externas. Puede depender de `core` y `application`. | `GameEventCollector`, `TipminerSseClient`, `TipminerGameHistoryClient`, `TelegramChannel` |
+| `api/` | Presentación HTTP para el frontend propio. Controllers + contratos (`view-models`) + mappers manuales. Depende solo de `application` (nunca de `infrastructure` directo — regla verificada en CI vía ESLint). | `HealthController`, `OperationsController`, `ChannelsController`, `EventsController` (SSE), `ApiKeyGuard`, `GlobalExceptionFilter`, `ResponseEnvelopeInterceptor` |
 
 Verificado con `grep`: cero imports de `core/` hacia `application/`/`infrastructure/`, cero `@nestjs/*` dentro de `core/`.
+
+**Contrato completo de `api/` (cada endpoint, qué manda, qué devuelve, códigos de error, formato SSE):** ver [`documentacion_mk_api.md`](./documentacion_mk_api.md) — ese documento es la referencia de consumo pensada para quien construya el frontend, este documento (`ARCHITECTURE.md`) se queda en el diseño interno de capas y eventos.
 
 ---
 
@@ -329,8 +331,102 @@ Todos los mensajes comparten:
 
 ## 12. Cómo extender
 
-- **Nueva estrategia**: crear una clase que implemente `Strategy` en `core/strategy/strategies/`, registrarla en `StrategyModule` (providers + factory). `StrategyCoordinator` no cambia. Si la estrategia quiere exponer información adicional en `StrategySignal`, agregar el campo al tipo y usarlo en `NotificationFactory`.
+### 12.1 Nueva estrategia
+
+**Contrato a implementar** (`core/strategy/interfaces/strategy.interface.ts`):
+
+```ts
+interface Strategy {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  enabled(): boolean;
+  evaluate(context: StrategyContext): StrategyResult;
+}
+```
+
+Una `Strategy` únicamente responde "¿detecto una oportunidad aquí?". Nunca
+administra `Operation`, nunca envía notificaciones, nunca conoce otras
+estrategias, `HistoryStore`, `DomainEventBus` ni Telegram — solo recibe un
+`StrategyContext` inmutable y devuelve un `StrategyResult`.
+
+**Ubicación**: `src/core/strategy/strategies/<nombre>.strategy.ts`. Si la
+lógica es "racha de N resultados iguales", extender
+`StreakStrategyBase` (ver `Streak3Strategy`/`Streak4Strategy`) en vez de
+reimplementar la detección desde cero — solo cambian `streakLength`,
+`maxMartingales`, `id`, `name` y `description`. Si la lógica es distinta,
+implementar `Strategy` directamente.
+
+**Qué puede leer y usar** (todo vía `StrategyContext`, nunca por fuera de él):
+- `context.historySnapshot`: el historial hasta la partida actual. Recalcular
+  siempre el criterio de detección desde el snapshot completo (nunca
+  acumular estado incrementalmente evento a evento), para que sobreviva un
+  reinicio del proceso y respete el historial ya cargado al arrancar.
+- `context.execution.canExecute(this.id)`: hay que preguntarlo antes de
+  evaluar nada más. Ya está resuelto por `ActiveOperationRegistry`
+  (genérico por `strategyId`, sin cambios necesarios): impide que la misma
+  estrategia tenga dos operaciones activas a la vez.
+- `context.runtimeState.get<T>(this.id)` / `.set(this.id, value)`: la única
+  memoria propia entre evaluaciones, aislada automáticamente por
+  `strategyId`. Úsala para recordar "ya generé señal para esta ocurrencia
+  del patrón" y no repetirla mientras el patrón se sigue extendiendo. No
+  hace falta ningún registro adicional: `InMemoryStrategyRuntimeState` ya
+  está inyectada en `StrategyModule`.
+- `context.currentGame`, `context.timestamp`: la partida que disparó esta
+  evaluación y el instante.
+
+**Qué devolver**: `{ triggered: false }` (sin oportunidad) o un
+`StrategySignal` completo (`triggered: true`, `strategyId`, `strategyName`,
+`triggeredAt`, `recommendedWinner`, `streakWinner` — ver §8.7 para qué
+significa este campo en los mensajes —, `maxMartingales`,
+`triggerGameUuid`, `reason`, `metadata`).
+
+**Los dos únicos puntos de registro reales** (patrón multi-provider manual,
+ver §8.3 y el comentario en `strategy.module.ts`):
+1. `StrategyModule` (`src/application/strategy/strategy.module.ts`):
+   importar la clase, sumarla a `providers`, a `inject` y al arreglo que
+   arma el `useFactory` de `STRATEGIES`. Los tres lugares deben coincidir
+   en el mismo orden — el error más común es actualizar `providers` y
+   olvidar `inject`/el arreglo del factory (o viceversa).
+2. `strategy-group.ts` (`src/core/strategy/strategy-group.ts`): **solo si**
+   la estrategia debe ir al canal de Pruebas, sumar su `id` a
+   `TEST_ONLY_STRATEGY_IDS`. Si va al canal Oficial, no tocar nada — es el
+   valor por defecto.
+
+**Por qué nada más requiere cambios**: `NotificationFactory`,
+`NotificationChannelDispatcher`, `TelegramChannel`, `ReportScheduler`,
+`SummaryReportService`, `StatisticsService` y `EngineMetricsService` son
+todos genéricos por `strategyId` (o no conocen el concepto en absoluto).
+En cuanto la estrategia empiece a generar señales con su `id` correcto,
+las notificaciones, los reportes horario/bajo demanda y las métricas de
+motor la recogen automáticamente sin ningún cambio adicional.
+
+**Buenas prácticas**:
+- `evaluate()` debe ser una función pura sobre su `context`: sin side
+  effects, sin leer `process.env`, sin estado mutable en la propia
+  instancia (usar siempre `context.runtimeState`).
+- No asumas que la estrategia puede elegir su propio canal — esa decisión
+  es exclusiva de `strategy-group.ts`. Una estrategia nunca debe conocer
+  `NotificationChannelType` ni Telegram.
+- Mientras se desarrolla, deja `enabled(): boolean { return false; }`
+  hasta tener specs propios en verde y la suite completa (`pnpm test`)
+  pasando; solo entonces cambiarlo a `true`.
+
+**Errores comunes**:
+- Registrar la clase en `providers` de `StrategyModule` pero olvidarla en
+  `inject`/el factory (o al revés): NestJS falla al resolver dependencias,
+  o la estrategia nunca aparece en `STRATEGIES`.
+- Olvidar clasificarla en `strategy-group.ts` cuando debía ir a Pruebas:
+  por defecto cae en `'oficial'` y sus señales llegarían al canal
+  equivocado.
+- Acumular el estado de detección en un campo de instancia en vez de
+  `context.runtimeState`: rompe tanto el aislamiento por `strategyId` como
+  la recuperación correcta tras un reinicio del proceso.
+
+### 12.2 Otros puntos de extensión
+
 - **Nuevo canal de notificación**: crear una clase que implemente `NotificationChannel` (incluyendo `deleteMessage`) en `infrastructure/`, registrarla en `NotificationModule`. `NotificationCoordinator` no cambia.
 - **Nueva métrica**: crear una clase concreta (sin interfaz) en `application/metrics/`, inyectarla donde se necesite. Cuando existan 3+ métricas con 1+ consumidor polimórfico, extraer `Metric<T>` interface y `MetricsCoordinator`.
 - **Nuevo evento de Operation**: agregar la clase en `core/domain-events/operation/`, actualizar `OperationCoordinator` (publicar el evento), agregar suscripción en `NotificationCoordinator` y método en `NotificationFactory`.
 - **Nuevo tipo de notificación**: agregar método en `NotificationFactory` siguiendo el patrón existente (recibe `snapshot`, `channel`, `distribution?`). Usar `formatWinnerBall()` para bolas y `appendDistribution()` para la línea de porcentajes.
+- **Persistencia (PostgreSQL/Supabase)**: `PersistenceModule`/`PrismaService` (`infrastructure/persistence/`) no participan del flujo de eventos ni del ciclo Strategy→Operation→Notification. La tabla `jugadas` (modelo `Jugada` en `prisma/schema.prisma`) ya existe en la base real — es la fuente de verdad histórica sobre la que se construirá el futuro motor de análisis de patrones, ver `DATABASE.md` para el esquema completo y las decisiones de diseño. Todavía no hay un servicio que la pueble (`GameEventCollector` sigue escribiendo solo en el `HistoryStore` en memoria); cuando se implemente, no debe tocar `StrategyCoordinator`, `OperationCoordinator` ni `NotificationCoordinator`. Si `DATABASE_URL` no está configurada o la conexión falla, `PrismaService.onModuleInit()` no lanza: la persistencia queda deshabilitada sin afectar al resto del motor.

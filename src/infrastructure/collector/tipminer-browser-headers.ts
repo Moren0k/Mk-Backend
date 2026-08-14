@@ -1,6 +1,6 @@
 /**
  * Headers que un navegador real envía al visitar tipminer.com. La API es
- * pública mesa "sin autenticación" (ver API.MD), pero eso no significa que
+ * pública mesa "sin autenticación" (ver API.md), pero eso no significa que
  * acepte cualquier request: sin estos headers, un `fetch`/EventSource de
  * Node se identifica con un User-Agent genérico y sin Referer/Origin, la
  * firma típica que un WAF (Cloudflare u otro) bloquea antes de llegar

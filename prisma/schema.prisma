@@ -1,0 +1,68 @@
+// Esquema de Prisma para bacbo-analysis-engine.
+//
+// Infraestructura de persistencia (PostgreSQL vía Supabase), desacoplada
+// del motor de eventos: ver src/infrastructure/persistence/. El modelo
+// `Jugada` es la primera tabla real — ver DATABASE.md para el esquema
+// completo, el diagrama y por qué se descartaron las alternativas
+// (ENUM/CHECK, uuid como PK, version/externalId/source). No agregar más
+// modelos aquí sin el mismo tipo de análisis: esta tabla es
+// deliberadamente mínima (7 columnas), sin operaciones/alertas/estrategias.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Conexión pooled (pgbouncer, modo transacción) usada en runtime por la app.
+  url = env("DATABASE_URL")
+  // Conexión directa/session-mode, requerida por Prisma Migrate (pgbouncer en
+  // modo transacción no soporta los prepared statements que usan las migraciones).
+  directUrl = env("DIRECT_URL")
+}
+
+/// Historial real de rondas de BacBo (Tipminer/Evolution). Fuente de verdad
+/// para el futuro motor de análisis de patrones/probabilidades — ver
+/// DATABASE.md para la justificación completa de cada columna, incluyendo
+/// por qué `version`/`externalId`/`source` (que la API llegó a documentar)
+/// se descartaron por completo.
+model Jugada {
+  /// PK secuencial interna. Deliberadamente NO es `uuid`: no hay garantía
+  /// formal de que el uuid de Tipminer sea time-ordered (UUIDv7), y apostar
+  /// el rendimiento de escritura de una tabla append-only 24/7 a eso es un
+  /// riesgo innecesario (ver DATABASE.md §6).
+  id BigInt @id @default(autoincrement())
+
+  /// Identificador real de la ronda según Tipminer (campo `uuid` de la API).
+  /// UNIQUE para deduplicar entre SSE e historial vía `ON CONFLICT`.
+  uuid String @unique @db.Uuid
+
+  /// Campo `result` de la API: suma de 2 dados. Rango teórico 2-12
+  /// (observado en vivo 4-12).
+  resultado Int @db.SmallInt
+
+  /// Campo `type` de la API (PLAYER/BANKER/TIE). VARCHAR sin CHECK a
+  /// propósito: si Tipminer manda un valor nuevo, el INSERT nunca debe
+  /// fallar por eso — la reacción a un valor desconocido es decisión de la
+  /// capa de aplicación, no una restricción de esquema.
+  ganador String @db.VarChar(20)
+
+  /// Campo `instant` de la API: momento UTC real en que ocurrió la ronda.
+  /// Distinto de `insertadoEn`.
+  jugadaEn DateTime @map("jugada_en") @db.Timestamptz(3)
+
+  /// Payload crudo completo tal como llegó de la API, antes de cualquier
+  /// parsing. Nullable a propósito: no bloquea una futura importación
+  /// masiva que solo traiga los campos ya normalizados. Red de seguridad
+  /// ante cambios de esquema de un proveedor no confiable (ya demostrado:
+  /// ver API.MD §5 — `version`/`externalId` desaparecieron sin aviso).
+  payloadOriginal Json? @map("payload_original") @db.JsonB
+
+  /// No viene de la API: momento real en que este sistema insertó la fila.
+  /// Permite medir lag de ingesta y detectar caídas del collector.
+  insertadoEn DateTime @default(now()) @map("insertado_en") @db.Timestamptz(3)
+
+  @@map("jugadas")
+  @@index([jugadaEn(sort: Desc)])
+  @@index([ganador, jugadaEn])
+}

@@ -257,6 +257,57 @@ describe('Operation', () => {
     });
   });
 
+  describe('cancel()', () => {
+    it('transitions an open operation to CANCELLED, with no triggering game', () => {
+      const operation = Operation.open(
+        buildSignal({ recommendedWinner: WinnerType.BANKER }),
+      );
+
+      const result = operation.cancel('cancelada manualmente desde la API');
+
+      expect(result.stateChanged).toBe(true);
+      expect(result.newState).toBe(OperationState.CANCELLED);
+      expect(result.completed).toBe(true);
+      expect(operation.currentState).toBe(OperationState.CANCELLED);
+      expect(operation.isFinished()).toBe(true);
+      expect(operation.closedAt).toBeInstanceOf(Date);
+      expect(operation.history).toEqual([
+        {
+          from: OperationState.OPEN,
+          to: OperationState.CANCELLED,
+          game: undefined,
+          timestamp: expect.any(Date) as Date,
+          reason: 'cancelada manualmente desde la API',
+        },
+      ]);
+    });
+
+    it('cancels an operation mid-martingale, preserving its currentMartingale count', () => {
+      const operation = Operation.open(
+        buildSignal({ recommendedWinner: WinnerType.BANKER }),
+      );
+      operation.update(buildGame('1', WinnerType.PLAYER));
+
+      operation.cancel('cancelada manualmente');
+
+      expect(operation.currentState).toBe(OperationState.CANCELLED);
+      expect(operation.currentMartingale).toBe(1);
+    });
+
+    it('does nothing once the operation already finished', () => {
+      const operation = Operation.open(
+        buildSignal({ recommendedWinner: WinnerType.BANKER }),
+      );
+      operation.update(buildGame('1', WinnerType.BANKER));
+
+      const result = operation.cancel('demasiado tarde');
+
+      expect(result.stateChanged).toBe(false);
+      expect(operation.currentState).toBe(OperationState.WON);
+      expect(operation.history).toHaveLength(1);
+    });
+  });
+
   describe('final states', () => {
     it('WON is a final state', () => {
       const operation = Operation.open(

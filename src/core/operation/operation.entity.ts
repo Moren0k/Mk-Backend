@@ -151,6 +151,21 @@ export class Operation {
     return this.handleLoss(game);
   }
 
+  /**
+   * Cancela la operación por comando explícito (Mk-Api.md Anexo D §4),
+   * nunca como resultado de una jugada — por eso no recibe un `Game`. No
+   * hace nada si ya terminó (mismo criterio defensivo que `update()`):
+   * quien dispara el comando decide qué hacer con un 409/404, esta clase
+   * solo reporta que no hubo cambio (`stateChanged: false`).
+   */
+  cancel(reason: string): OperationUpdateResult {
+    if (this.isFinished()) {
+      return this.buildResult(false, undefined, false);
+    }
+
+    return this.applyTransition(OperationState.CANCELLED, undefined, reason);
+  }
+
   toSnapshot(): OperationSnapshot {
     return Object.freeze({
       operationId: this.operationId,
@@ -196,7 +211,7 @@ export class Operation {
 
   private applyTransition(
     newState: OperationState,
-    game: Game,
+    game: Game | undefined,
     reason: string,
   ): OperationUpdateResult {
     const transition: OperationTransition = Object.freeze({

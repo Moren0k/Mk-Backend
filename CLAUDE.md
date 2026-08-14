@@ -11,7 +11,10 @@ Motor de procesamiento de eventos en tiempo real (NestJS + Fastify) que analiza 
 Documentación de referencia (leer antes de tocar la arquitectura):
 - [`README.md`](./README.md) — visión general, variables de entorno, diagrama de secuencia.
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — capas, eventos, módulos NestJS y decisiones de diseño clave (§8), incluyendo por qué el orden de `imports` de NestJS no debe importar para la corrección del sistema.
-- [`API.MD`](./API.MD) — contrato verificado de la API de Tipminer (endpoints, IDs de la mesa Bac Bo, formato SSE).
+- [`API.md`](./API.md) — contrato verificado de la API de Tipminer (endpoints, IDs de la mesa Bac Bo, formato SSE).
+- [`documentacion_mk_api.md`](./documentacion_mk_api.md) — contrato completo de **nuestra** API propia (`src/api/`): cada endpoint, auth, request/response, códigos de error, formato SSE. Actualizar este documento junto con cualquier cambio en `src/api/`.
+- [`DATABASE.md`](./DATABASE.md) — base de datos (PostgreSQL/Supabase vía Prisma): cómo conectarse, esquema real de la tabla `jugadas`, diagramas y decisiones de diseño.
+- [`Mk-Api.md`](./Mk-Api.md) — bitácora de decisiones/ADRs de diseño de `src/api/` (por qué se construyó así, alternativas descartadas). Referenciada por decenas de comentarios en `src/api/` y `src/application/` (`grep -r "Mk-Api.md" src/`) — no borrar sin antes limpiar esas referencias.
 - `INIT.md` — documento de arquitectura original/objetivo (fuente de verdad conceptual; `ARCHITECTURE.md` describe el estado real implementado).
 
 ## Comandos
@@ -54,7 +57,8 @@ Flujo end-to-end (ver diagrama PlantUML completo en `README.md`):
 ```
 Tipminer (SSE/HTTP) → GameEventCollector → HistoryStore.append()
     → publish(GameReceivedEvent{game, isHistorical})
-        → StrategyCoordinator (ignora si isHistorical) → Streak3Strategy.evaluate()
+        → StrategyCoordinator (ignora si isHistorical)
+            → Streak4Strategy.evaluate()           ← oficial (racha-4)
             → StrategyTriggeredEvent → OperationCoordinator → Operation.open()
                 → OperationOpenedEvent → NotificationCoordinator → TelegramChannel
         → OperationCoordinator (partidas siguientes, actualiza operaciones activas)
@@ -79,7 +83,7 @@ Puntos que no son obvios leyendo un solo archivo:
 
 ## API externa (Tipminer)
 
-Detalle completo verificado en `API.MD`. Puntos que generan bugs si se pasan por alto:
+Detalle completo verificado en `API.md`. Puntos que generan bugs si se pasan por alto:
 
 - En rutas `/rounds/...` siempre va el **`provider`** (uuid de la mesa), nunca el uuid del juego — si te equivocas, la API responde `[]` sin error.
 - `limit` en `/history` tiene tope real de 200 aunque pidas más.

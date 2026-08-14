@@ -45,14 +45,38 @@ export class NotificationChannelDispatcher {
     buildNotification: (channelType: NotificationChannelType) => Notification,
     onSent?: (notification: Notification, result: SendResult) => void,
   ): void {
-    for (const channel of this.channels) {
+    this.dispatch(this.channels, buildNotification, true, onSent);
+  }
+
+  /**
+   * Igual que `dispatchToAll`, pero dirigido a un subconjunto explícito de
+   * canales en vez de `this.channels`, y sin aplicar `channel.supports()`:
+   * quien llama ya decidió el destino a propósito (p. ej. el endpoint admin
+   * de resumen eligiendo "oficial"/"pruebas"/"todos"), así que el filtro por
+   * estrategia de `supports()` no debe volver a excluirlo.
+   */
+  dispatchTo(
+    channels: readonly NotificationChannel[],
+    buildNotification: (channelType: NotificationChannelType) => Notification,
+    onSent?: (notification: Notification, result: SendResult) => void,
+  ): void {
+    this.dispatch(channels, buildNotification, false, onSent);
+  }
+
+  private dispatch(
+    channels: readonly NotificationChannel[],
+    buildNotification: (channelType: NotificationChannelType) => Notification,
+    applySupportsFilter: boolean,
+    onSent?: (notification: Notification, result: SendResult) => void,
+  ): void {
+    for (const channel of channels) {
       if (!channel.enabled()) {
         continue;
       }
 
       const notification = buildNotification(channel.getChannelType());
 
-      if (!channel.supports(notification)) {
+      if (applySupportsFilter && !channel.supports(notification)) {
         continue;
       }
 

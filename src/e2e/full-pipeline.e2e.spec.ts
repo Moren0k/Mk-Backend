@@ -8,6 +8,7 @@ import { NotificationCoordinator } from '../application/notification/notificatio
 import { ActiveOperationRegistry } from '../application/operation/active-operation-registry';
 import { OperationCoordinator } from '../application/operation/operation.coordinator';
 import { InMemoryStrategyRuntimeState } from '../application/strategy/in-memory-strategy-runtime-state';
+import { StrategyChannelRegistry } from '../application/strategy/strategy-channel-registry';
 import { StrategyCoordinator } from '../application/strategy/strategy.coordinator';
 import { DomainEvent } from '../core/domain-events/base/domain-event';
 import { DomainEventHandler } from '../core/domain-events/base/domain-event-handler.interface';
@@ -32,7 +33,7 @@ import { NotificationFactory } from '../core/notification/notification.factory';
 import { Notification } from '../core/notification/notification.type';
 import type { SendResult } from '../core/notification/types/send-result.type';
 import { EngineErrorTracker } from '../core/observability/engine-error-tracker';
-import { Streak3Strategy } from '../core/strategy/strategies/streak3.strategy';
+import { Streak4Strategy } from '../core/strategy/strategies/streak4.strategy';
 
 /**
  * Prueba end-to-end del pipeline completo, SIN la API real: en vez de
@@ -103,14 +104,23 @@ function buildEngine(): Engine {
   const errorTracker = new EngineErrorTracker();
   const activeOperationRegistry = new ActiveOperationRegistry();
   const strategyRuntimeState = new InMemoryStrategyRuntimeState();
+  const strategyChannelRegistry = new StrategyChannelRegistry(
+    activeOperationRegistry,
+  );
+  // Por default (2026-08-11) ninguna estrategia está asignada a ningún
+  // canal: hay que configurarlo explícitamente, igual que haría un
+  // operador real vía PATCH /api/v1/channels/oficial antes de operar.
+  strategyChannelRegistry.assignStrategyToChannel('streak-4', 'oficial');
+  strategyChannelRegistry.setActive('oficial', true);
 
   const strategyCoordinator = new StrategyCoordinator(
     historyStore,
     domainEventBus,
-    [new Streak3Strategy()],
+    [new Streak4Strategy()],
     errorTracker,
     activeOperationRegistry,
     strategyRuntimeState,
+    strategyChannelRegistry,
   );
   const operationCoordinator = new OperationCoordinator(
     domainEventBus,
@@ -201,22 +211,24 @@ describe('Full pipeline (e2e, no real API)', () => {
   it('streak -> signal -> operation -> MG1 -> MG2 -> victory, with every event in order', async () => {
     const engine = buildEngine();
 
-    // Historia inicial (ruido, sin racha) + la racha que dispara la señal.
+    // Historia inicial (ruido, sin racha) + la racha de 4 (Streak4Strategy)
+    // que dispara la señal.
     await feedGame(engine, buildGame('1', WinnerType.TIE));
     await feedGame(engine, buildGame('2', WinnerType.TIE));
     await feedGame(engine, buildGame('3', WinnerType.PLAYER));
     await feedGame(engine, buildGame('4', WinnerType.PLAYER));
-    await feedGame(engine, buildGame('5', WinnerType.PLAYER)); // dispara la señal
+    await feedGame(engine, buildGame('5', WinnerType.PLAYER));
+    await feedGame(engine, buildGame('6', WinnerType.PLAYER)); // dispara la señal
 
-    // Un TIE entre cada jugada real evita que Streak3Strategy vuelva a
-    // disparar sobre las mismas 3 últimas PLAYER (ver comentario en la
+    // Un TIE entre cada jugada real evita que Streak4Strategy vuelva a
+    // disparar sobre las mismas 4 últimas PLAYER (ver comentario en la
     // etapa 8 sobre por qué se intercalan).
-    await feedGame(engine, buildGame('6', WinnerType.TIE));
-    await feedGame(engine, buildGame('7', WinnerType.PLAYER)); // MG1
-    await feedGame(engine, buildGame('8', WinnerType.TIE));
-    await feedGame(engine, buildGame('9', WinnerType.PLAYER)); // MG2
-    await feedGame(engine, buildGame('10', WinnerType.TIE));
-    await feedGame(engine, buildGame('11', WinnerType.BANKER)); // victoria
+    await feedGame(engine, buildGame('7', WinnerType.TIE));
+    await feedGame(engine, buildGame('8', WinnerType.PLAYER)); // MG1
+    await feedGame(engine, buildGame('9', WinnerType.TIE));
+    await feedGame(engine, buildGame('10', WinnerType.PLAYER)); // MG2
+    await feedGame(engine, buildGame('11', WinnerType.TIE));
+    await feedGame(engine, buildGame('12', WinnerType.BANKER)); // victoria
 
     expect(engine.publishedEvents.map((e) => e.eventName)).toEqual([
       StrategyTriggeredEvent.eventName,
@@ -262,8 +274,8 @@ describe('Full pipeline (e2e, no real API)', () => {
 
     // Estadísticas.
     const statistics = engine.statisticsService.getSnapshot();
-    expect(statistics.totalGames).toBe(11);
-    expect(statistics.playerWins).toBe(5);
+    expect(statistics.totalGames).toBe(12);
+    expect(statistics.playerWins).toBe(6);
     expect(statistics.bankerWins).toBe(1);
     expect(statistics.ties).toBe(5);
     expect(statistics.currentStreak).toEqual({
@@ -273,7 +285,7 @@ describe('Full pipeline (e2e, no real API)', () => {
 
     // Métricas del motor.
     expect(engine.engineMetricsService.getSnapshot()).toEqual({
-      gamesReceived: 11,
+      gamesReceived: 12,
       signalsGenerated: 1,
       operationsOpened: 1,
       operationsWon: 1,
@@ -292,14 +304,15 @@ describe('Full pipeline (e2e, no real API)', () => {
     await feedGame(engine, buildGame('2', WinnerType.TIE));
     await feedGame(engine, buildGame('3', WinnerType.PLAYER));
     await feedGame(engine, buildGame('4', WinnerType.PLAYER));
-    await feedGame(engine, buildGame('5', WinnerType.PLAYER)); // dispara la señal (recomienda BANKER)
+    await feedGame(engine, buildGame('5', WinnerType.PLAYER));
+    await feedGame(engine, buildGame('6', WinnerType.PLAYER)); // dispara la señal (recomienda BANKER)
 
-    await feedGame(engine, buildGame('6', WinnerType.TIE));
-    await feedGame(engine, buildGame('7', WinnerType.PLAYER)); // MG1
-    await feedGame(engine, buildGame('8', WinnerType.TIE));
-    await feedGame(engine, buildGame('9', WinnerType.PLAYER)); // MG2
-    await feedGame(engine, buildGame('10', WinnerType.TIE));
-    await feedGame(engine, buildGame('11', WinnerType.PLAYER)); // 3ª pérdida -> LOST
+    await feedGame(engine, buildGame('7', WinnerType.TIE));
+    await feedGame(engine, buildGame('8', WinnerType.PLAYER)); // MG1
+    await feedGame(engine, buildGame('9', WinnerType.TIE));
+    await feedGame(engine, buildGame('10', WinnerType.PLAYER)); // MG2
+    await feedGame(engine, buildGame('11', WinnerType.TIE));
+    await feedGame(engine, buildGame('12', WinnerType.PLAYER)); // 3ª pérdida -> LOST
 
     // Eventos, en orden.
     expect(engine.publishedEvents.map((e) => e.eventName)).toEqual([
@@ -341,8 +354,8 @@ describe('Full pipeline (e2e, no real API)', () => {
 
     // Estadísticas.
     const statistics = engine.statisticsService.getSnapshot();
-    expect(statistics.totalGames).toBe(11);
-    expect(statistics.playerWins).toBe(6);
+    expect(statistics.totalGames).toBe(12);
+    expect(statistics.playerWins).toBe(7);
     expect(statistics.bankerWins).toBe(0);
     expect(statistics.ties).toBe(5);
     expect(statistics.currentStreak).toEqual({
@@ -352,7 +365,7 @@ describe('Full pipeline (e2e, no real API)', () => {
 
     // Métricas.
     expect(engine.engineMetricsService.getSnapshot()).toEqual({
-      gamesReceived: 11,
+      gamesReceived: 12,
       signalsGenerated: 1,
       operationsOpened: 1,
       operationsWon: 0,
@@ -376,12 +389,13 @@ describe('Full pipeline (e2e, no real API)', () => {
       ['3', WinnerType.PLAYER],
       ['4', WinnerType.PLAYER],
       ['5', WinnerType.PLAYER],
-      ['6', WinnerType.TIE],
-      ['7', WinnerType.PLAYER],
-      ['8', WinnerType.TIE],
-      ['9', WinnerType.PLAYER],
-      ['10', WinnerType.TIE],
-      ['11', WinnerType.BANKER],
+      ['6', WinnerType.PLAYER],
+      ['7', WinnerType.TIE],
+      ['8', WinnerType.PLAYER],
+      ['9', WinnerType.TIE],
+      ['10', WinnerType.PLAYER],
+      ['11', WinnerType.TIE],
+      ['12', WinnerType.BANKER],
     ] as const) {
       await feedGame(engine, buildGame(uuid, winner), true);
     }
@@ -392,9 +406,9 @@ describe('Full pipeline (e2e, no real API)', () => {
 
     // Statistics y EngineMetrics sí reflejan el historial completo: es
     // analítica descriptiva, no una decisión accionable.
-    expect(engine.statisticsService.getSnapshot().totalGames).toBe(11);
+    expect(engine.statisticsService.getSnapshot().totalGames).toBe(12);
     expect(engine.engineMetricsService.getSnapshot()).toEqual({
-      gamesReceived: 11,
+      gamesReceived: 12,
       signalsGenerated: 0,
       operationsOpened: 0,
       operationsWon: 0,
@@ -409,23 +423,24 @@ describe('Full pipeline (e2e, no real API)', () => {
   it('does not open a new operation on every consecutive matching game while one is already active for that strategy', async () => {
     const engine = buildEngine();
 
-    // Racha de 3 PLAYER: dispara y abre una única Operation (recomienda
-    // BANKER). Las siguientes PLAYER consecutivas (4 y 5) siguen formando
-    // una "racha de 3" sobre el historial (2-3-4 y 3-4-5), pero streak-3 ya
-    // tiene una operación activa: StrategyExecutionGuard debe bloquear la
-    // señal, en vez de abrir Operation #2 y #3 como antes de este fix.
+    // Racha de 4 PLAYER: dispara y abre una única Operation (recomienda
+    // BANKER). Las siguientes PLAYER consecutivas siguen formando "una
+    // racha de 4" sobre el historial, pero streak-4 ya tiene una operación
+    // activa: StrategyExecutionGuard debe bloquear la señal, en vez de
+    // abrir Operation #2 y #3 como antes de este fix.
     await feedGame(engine, buildGame('1', WinnerType.PLAYER));
     await feedGame(engine, buildGame('2', WinnerType.PLAYER));
-    await feedGame(engine, buildGame('3', WinnerType.PLAYER)); // dispara Operation A
+    await feedGame(engine, buildGame('3', WinnerType.PLAYER));
+    await feedGame(engine, buildGame('4', WinnerType.PLAYER)); // dispara Operation A
     expect(engine.operationCoordinator.activeCount()).toBe(1);
 
-    await feedGame(engine, buildGame('4', WinnerType.PLAYER)); // Operation A -> MG1
+    await feedGame(engine, buildGame('5', WinnerType.PLAYER)); // Operation A -> MG1
     expect(engine.operationCoordinator.activeCount()).toBe(1);
 
-    await feedGame(engine, buildGame('5', WinnerType.PLAYER)); // Operation A -> MG2
+    await feedGame(engine, buildGame('6', WinnerType.PLAYER)); // Operation A -> MG2
     expect(engine.operationCoordinator.activeCount()).toBe(1);
 
-    await feedGame(engine, buildGame('6', WinnerType.PLAYER)); // Operation A -> LOST (3ª pérdida)
+    await feedGame(engine, buildGame('7', WinnerType.PLAYER)); // Operation A -> LOST (3ª pérdida)
     expect(engine.operationCoordinator.activeCount()).toBe(0);
 
     const triggeredSoFar = engine.publishedEvents.filter(
@@ -440,10 +455,10 @@ describe('Full pipeline (e2e, no real API)', () => {
 
     // Operation A ya cerró (LOST), y StrategyExecutionGuard ya permitiría
     // ejecutar de nuevo. Pero la racha de PLAYER NUNCA se rompió (juegos
-    // 1-7 son todos PLAYER): sigue siendo la MISMA racha que ya generó su
-    // señal, así que streak-3 no debe volver a disparar. Este es el punto
+    // 1-8 son todos PLAYER): sigue siendo la MISMA racha que ya generó su
+    // señal, así que streak-4 no debe volver a disparar. Este es el punto
     // que el fix anterior (solo concurrencia de operaciones) no cubría.
-    await feedGame(engine, buildGame('7', WinnerType.PLAYER));
+    await feedGame(engine, buildGame('8', WinnerType.PLAYER));
 
     expect(
       engine.publishedEvents.filter(
@@ -459,7 +474,7 @@ describe('Full pipeline (e2e, no real API)', () => {
 
     // Un TIE rompe la racha: no cuenta como PLAYER ni como el inicio de
     // una nueva racha por sí mismo.
-    await feedGame(engine, buildGame('8', WinnerType.TIE));
+    await feedGame(engine, buildGame('9', WinnerType.TIE));
     expect(
       engine.publishedEvents.filter(
         (e) => e.eventName === StrategyTriggeredEvent.eventName,
@@ -468,9 +483,10 @@ describe('Full pipeline (e2e, no real API)', () => {
 
     // Ahora sí: una racha genuinamente nueva (BANKER, distinta a la que ya
     // se consumió) vuelve a habilitar la señal y abre Operation B.
-    await feedGame(engine, buildGame('9', WinnerType.BANKER));
     await feedGame(engine, buildGame('10', WinnerType.BANKER));
     await feedGame(engine, buildGame('11', WinnerType.BANKER));
+    await feedGame(engine, buildGame('12', WinnerType.BANKER));
+    await feedGame(engine, buildGame('13', WinnerType.BANKER));
 
     expect(
       engine.publishedEvents.filter(
