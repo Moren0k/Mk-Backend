@@ -15,6 +15,33 @@ export default () => ({
     // nada) en vez de aceptar un secreto predecible.
     key: process.env.API_KEY,
   },
+  auth: {
+    // Contraseña única del login del panel frontend (AccessGate,
+    // POST /api/v1/auth/login, ver auth.controller.ts). Nunca viaja
+    // incrustada en el JS del frontend: se compara acá y, si acierta, se
+    // devuelve `api.key` (arriba) recién en ese momento. Sin definir, el
+    // endpoint falla cerrado (nunca acepta ninguna contraseña).
+    accessPassword: process.env.ACCESS_PASSWORD,
+  },
+  cors: {
+    // Lista blanca de orígenes permitidos, separados por coma (p. ej.
+    // "https://mi-frontend.com,https://staging.mi-frontend.com"). Sin
+    // definir, `main.ts` cae a `origin: true` (cualquier origen) para no
+    // romper el flujo de desarrollo local antes de tener un dominio fijo.
+    allowedOrigins: (process.env.CORS_ALLOWED_ORIGINS ?? '')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter((origin) => origin.length > 0),
+  },
+  rateLimit: {
+    // Ventana y tope por IP para el ThrottlerGuard global (AppModule).
+    // Defaults generosos: el frontend legítimo hace sondeo (polling) de
+    // GET /api/v1/reports/summary en un intervalo propio, más algunos GETs
+    // puntuales al cargar cada página — 300 req/min por IP da margen de
+    // sobra sin dejar de frenar un abuso real (script en loop apretado).
+    ttlMs: parseInt(process.env.RATE_LIMIT_TTL_MS ?? '60000', 10),
+    limit: parseInt(process.env.RATE_LIMIT_LIMIT ?? '300', 10),
+  },
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN,
     chatId: process.env.TELEGRAM_CHAT_ID,

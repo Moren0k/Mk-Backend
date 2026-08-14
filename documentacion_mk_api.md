@@ -7,7 +7,7 @@
 ## 1. Lo esencial en 30 segundos
 
 - **Base URL:** `http://<host>:<port>/api/v1` (todo bajo este prefijo, salvo `GET /healthz` — ver §8). Puerto default `3000` (`PORT` en `.env`).
-- **Auth:** header `X-Api-Key: <secreto>` en **todo** endpoint, salvo `GET /api/v1/health`. Sin login, sin JWT, sin roles: un único secreto compartido para el frontend propio.
+- **Auth:** header `X-Api-Key: <secreto>` en **todo** endpoint, salvo `GET /api/v1/health` y `POST /api/v1/auth/login` (§4.12). Sin JWT, sin roles: un único secreto compartido para el frontend propio — que ya no lo incrusta en su build, lo obtiene en runtime vía el login del panel.
 - **CORS:** abierto a cualquier origen mientras el proyecto está en desarrollo (`app.enableCors({ origin: true, ... })` en `main.ts`) — un frontend en otro dominio/puerto puede llamar directo desde el navegador sin configuración adicional. Se va a restringir a una allowlist de dominios antes de producción.
 - **Formato de respuesta:** siempre JSON, siempre el mismo sobre (`{ data, meta?, requestId }` o `{ error }`) — ver §2.
 - **Nada de esto habla con Tipminer/Telegram/Prisma directo**: todo pasa por casos de uso ya existentes en `application/`.
@@ -24,7 +24,8 @@ X-Api-Key: <valor de la variable de entorno API_KEY>
 
 - Configurar `API_KEY` en `.env` (ver `.env.example`). Si no está configurada, **todo** endpoint protegido responde `401` sin importar qué se mande.
 - El valor se compara siempre como hash SHA-256 (`timingSafeEqual`), nunca en texto plano — igual que el patrón ya usado por el endpoint admin legado.
-- **Único endpoint público:** `GET /api/v1/health`.
+- **Endpoints públicos (sin `X-Api-Key`):** `GET /api/v1/health` y `POST /api/v1/auth/login` (§4.12).
+- El frontend propio (`Mk-Frontend`) no incrusta `API_KEY` en su build: la obtiene en runtime llamando a `POST /api/v1/auth/login` con una contraseña separada (`ACCESS_PASSWORD`, distinta de `API_KEY`) — ver §4.12.
 - Sin ese header (o con uno incorrecto), cualquier otro endpoint responde:
 
 ```json
@@ -447,6 +448,44 @@ Sin query params, sin body.
 
 ---
 
+### 4.12 `POST /api/v1/auth/login` — Login Gateway del panel frontend
+
+Segundo (y único otro) endpoint público junto a `GET /api/v1/health`: no requiere `X-Api-Key`. Existe para que el frontend (`AccessGate`, panel de Mk-Frontend) nunca tenga que incrustar `X-Api-Key` en su JS compilado — en vez de eso, pide una contraseña al usuario, la manda acá, y si acierta recibe la API key real para usarla el resto de la sesión (en memoria/`sessionStorage` del navegador, nunca en el bundle de build).
+
+**Body:**
+
+```json
+{ "password": "la-contraseña-del-panel" }
+```
+
+**200 — contraseña correcta:**
+
+```json
+{
+  "data": { "apiKey": "el-valor-real-de-API_KEY" },
+  "requestId": "…"
+}
+```
+
+**401 — contraseña incorrecta, vacía, o `ACCESS_PASSWORD`/`API_KEY` sin configurar en el backend** (mismo código en los tres casos, a propósito — no dar pistas de cuál es el problema):
+
+```json
+{
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Contraseña incorrecta.",
+    "requestId": "…",
+    "timestamp": "…"
+  }
+}
+```
+
+- Se compara siempre como hash SHA-256 (`timingSafeEqual`), nunca en texto plano — mismo patrón que `ApiKeyGuard` (§2), implementado independiente en `auth.controller.ts` (duplicación intencional de 3 líneas, no vale una dependencia cruzada por tan poco).
+- **Rate limit propio y mucho más estricto que el resto de la API:** 5 intentos/minuto por IP (`@Throttle`, ver `AppModule`/§ rate limiting), en vez de los 300/min globales — este es el único endpoint donde tiene sentido un ataque de fuerza bruta, porque es el único que acepta un secreto sin haberlo validado antes.
+- No tiene sentido de negocio, es puro control de acceso al panel — no toca nada de `application/` ni `core/`.
+
+---
+
 ## 5. Cómo se relacionan `operations`, `channels` y `events/stream` (flujo típico de una página del frontend)
 
 **0. Antes de que cualquier estrategia haga algo** (típicamente una vez por cada arranque del proceso, ver §1): pintar el selector con `GET /api/v1/strategies` (§4.11) y configurar los canales con lo que elija el usuario, por ejemplo:
@@ -487,8 +526,8 @@ Cada página del frontend (`/panel/oficial`, `/panel/pruebas`) sigue este patró
 ## 7. Qué NO existe todavía (fuera de alcance, a propósito)
 
 - **`GET /api/v1/results`** (historial profundo desde la base de datos `jugadas`) — no se activó la ingesta a la tabla; solo existe la ventana en memoria de 200 jugadas (§4.3). Ver Mk-Api.md Anexo D §1.
-- **Allowlist de CORS por dominio** — mientras el proyecto está en desarrollo, CORS está **abierto a cualquier origen** (`origin: true` en `main.ts`, ver §1) para no bloquear al frontend antes de tener un dominio fijo. Antes de producción hay que reemplazarlo por una allowlist explícita de dominios permitidos.
-- **Rate limiting** — diferido; no hay ninguna dependencia de rate-limit instalada todavía.
+- **Allowlist de CORS por dominio** — implementada vía la variable de entorno `CORS_ALLOWED_ORIGINS` (coma-separada, ver `.env.example`). Sin definirla, `main.ts` cae a `origin: true` (cualquier origen) para no bloquear el desarrollo local; en el despliegue real hay que fijarla con el/los dominio(s) reales del frontend.
+- **Rate limiting** — implementado con `@nestjs/throttler` como `APP_GUARD` global (`AppModule`): por defecto 300 requests/minuto por IP (`RATE_LIMIT_LIMIT`/`RATE_LIMIT_TTL_MS`, ver `.env.example`), suficiente margen para el patrón de sondeo descrito en §5. Al excederlo, la API responde `429 Too Many Requests` con el mismo envelope de error (`ApiErrorCode.RATE_LIMITED`). `GET /api/v1/events/stream` (SSE) está exento — es una conexión larga, no peticiones repetidas.
 - **Roles/multiusuario/JWT** — decisión de negocio: un único secreto compartido es suficiente, no hay operadores humanos diferenciados.
 - **Backpressure/límite de clientes SSE** — ver §4.8.
 - **Desasignar explícitamente una estrategia de un canal** (`strategyId: null` vía `PATCH`) — no soportado; la única forma de "vaciar" un canal es asignarle otra estrategia distinta (ver §4.7).
@@ -511,6 +550,9 @@ Cada página del frontend (`/panel/oficial`, `/panel/pruebas`) sigue este patró
 | Variable | Para qué |
 |---|---|
 | `API_KEY` | Secreto compartido que exige `X-Api-Key` en toda la API nueva. Sin ella, todo responde 401 |
+| `ACCESS_PASSWORD` | Contraseña del login del panel (`POST /api/v1/auth/login`, §4.12). Sin ella, ese endpoint rechaza cualquier contraseña |
+| `CORS_ALLOWED_ORIGINS` | Allowlist de orígenes CORS, coma-separada. Sin definir, acepta cualquier origen |
+| `RATE_LIMIT_LIMIT` / `RATE_LIMIT_TTL_MS` | Tope/ventana del rate limit global por IP (default 300/60000ms) |
 | `PORT` | Puerto HTTP (ya existía, sin cambios) |
 
 Ver `.env.example` para la lista completa (incluye las de Telegram/Tipminer/DB, no específicas de esta capa).

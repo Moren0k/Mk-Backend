@@ -1,5 +1,6 @@
 import { Controller, Sse, UseFilters, UseGuards } from '@nestjs/common';
 import type { MessageEvent } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Observable, map } from 'rxjs';
 
 import { EventsReadModel } from '../../../application/read-models/events.read-model';
@@ -16,10 +17,15 @@ import { ApiKeyGuard } from '../../common/guards/api-key.guard';
  * `{type, data}` que espera el mecanismo de SSE de Nest (ver
  * `sse-stream.js` en `@nestjs/core`). El filtro de errores y el guard de
  * autenticación sí aplican igual que en el resto de la API.
+ *
+ * `@SkipThrottle()`: exento del ThrottlerGuard global (AppModule). Es una
+ * única conexión larga, no peticiones repetidas — contarla penalizaría
+ * reconexiones legítimas del frontend tras un corte de red.
  */
 @Controller('events')
 @UseFilters(GlobalExceptionFilter)
 @UseGuards(ApiKeyGuard)
+@SkipThrottle()
 export class EventsController {
   constructor(private readonly eventsReadModel: EventsReadModel) {}
 

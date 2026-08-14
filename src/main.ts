@@ -5,6 +5,7 @@ import {
   FastifyAdapter,
   NestFastifyApplication,
 } from '@nestjs/platform-fastify';
+import helmet from '@fastify/helmet';
 
 import { AppModule } from './app.module';
 import { EngineHealth } from './application/observability/engine-health';
@@ -12,6 +13,7 @@ import { StatisticsService } from './application/statistics/statistics.service';
 import { GameEventCollector } from './infrastructure/collector/game-event-collector';
 
 async function bootstrap(): Promise<void> {
+  const logger = new Logger('Bootstrap');
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter(),
@@ -28,23 +30,38 @@ async function bootstrap(): Promise<void> {
   // por `setGlobalPrefix` en absoluto.
   app.setGlobalPrefix('api/v1');
 
-  // CORS: abierto a propósito mientras el proyecto está en desarrollo y
-  // todavía no hay un dominio de frontend fijo que poner en una allowlist
-  // (decisión explícita del dueño del sistema, revierte Mk-Api.md Anexo D
-  // §6). `origin: true` refleja el header `Origin` de cada request — no es
-  // `"*"` literal, así que sigue funcionando si en algún momento se agregan
-  // credenciales/cookies, pero equivale a "cualquier origen puede llamar a
-  // la API". **Antes de producción, reemplazar por una allowlist explícita
-  // de dominios.**
+  // CORS: allowlist explícita vía CORS_ALLOWED_ORIGINS (coma-separado, ver
+  // configuration.ts). Sin esa variable definida, cae a `origin: true`
+  // (refleja el header `Origin` de cada request, no es `"*"` literal) para
+  // no romper el flujo de desarrollo local antes de tener un dominio fijo
+  // — pero en cuanto se define la variable en el entorno de despliegue,
+  // solo esos orígenes pueden llamar a la API.
+  const allowedOrigins = configService.get<string[]>('cors.allowedOrigins', []);
+
+  if (allowedOrigins.length === 0) {
+    logger.warn(
+      'CORS_ALLOWED_ORIGINS no está definida: aceptando peticiones de ' +
+        'cualquier origen (origin: true). Definir esta variable antes de ' +
+        'exponer la API a Internet.',
+    );
+  }
+
   app.enableCors({
-    origin: true,
+    origin: allowedOrigins.length > 0 ? allowedOrigins : true,
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'X-Api-Key', 'X-Request-Id'],
   });
 
-  // Rate limiting: diferido a cuando existan recursos reales que proteger
-  // más allá de /health (F4, Mk-Api.md §20) — hoy no hay superficie que
-  // abusar.
+  // Helmet (@fastify/helmet): headers de seguridad estándar (X-Content-Type-
+  // Options, X-Frame-Options, Strict-Transport-Security, etc.). API pura
+  // JSON/SSE, sin HTML servido desde acá, así que la CSP por defecto no
+  // tiene efecto práctico pero tampoco estorba.
+  await app.register(helmet);
+
+  // Rate limiting: ver ThrottlerModule en app.module.ts (global vía
+  // APP_GUARD). GET /api/v1/events/stream (SSE) está exento (@SkipThrottle
+  // en EventsController): es una única conexión larga, no peticiones
+  // repetidas, y contarla penalizaría reconexiones legítimas.
 
   // Shutdown hooks: ante SIGTERM/SIGINT (p. ej. Ctrl+C) NestJS ejecuta los
   // OnModuleDestroy y GameEventCollector cierra el SSE limpio.
