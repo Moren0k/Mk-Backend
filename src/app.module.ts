@@ -1,4 +1,7 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 
 import { ApiModule } from './api/api.module';
 import { AppConfigModule } from './infrastructure/config/app-config.module';
@@ -39,6 +42,22 @@ import { PersistenceModule } from './infrastructure/persistence/persistence.modu
 @Module({
   imports: [
     AppConfigModule,
+    // Rate limiting global por IP (ver configuration.ts `rateLimit`).
+    // Aplicado como APP_GUARD (a diferencia de ApiKeyGuard/interceptor de
+    // envelope en ApiModule): frenar abuso es una preocupación transversal
+    // a toda la app, no específica de la capa `api/`, así que no hay
+    // conflicto de contrato en aplicarlo globalmente.
+    // GET /api/v1/events/stream está exento vía @SkipThrottle() (conexión
+    // SSE larga, no peticiones repetidas).
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => [
+        {
+          ttl: configService.get<number>('rateLimit.ttlMs', 60000),
+          limit: configService.get<number>('rateLimit.limit', 300),
+        },
+      ],
+    }),
     HistoryModule,
     OperationModule,
     StrategyModule,
@@ -48,6 +67,12 @@ import { PersistenceModule } from './infrastructure/persistence/persistence.modu
     ReportingModule,
     PersistenceModule,
     ApiModule,
+  ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
   ],
 })
 export class AppModule {}

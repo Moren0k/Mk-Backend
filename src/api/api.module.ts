@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { AdminModule } from './resources/admin/admin.module';
+import { AuthModule } from './resources/auth/auth.module';
 import { ChannelsModule } from './resources/channels/channels.module';
 import { EventsModule } from './resources/events/events.module';
 import { HealthModule } from './resources/health/health.module';
@@ -34,6 +35,7 @@ import { StrategiesModule } from './resources/strategies/strategies.module';
     HistoryModule,
     OperationsModule,
     AdminModule,
+    AuthModule,
     ChannelsModule,
     EventsModule,
     ReportsModule,
