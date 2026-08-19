@@ -1,5 +1,6 @@
 import { OperationState } from '../../enums/operation-state.enum';
 import { WinnerType } from '../../enums/winner-type.enum';
+import { StrategyGroup } from '../../strategy/strategy-group';
 import { OperationTransition } from './operation-transition.type';
 
 /**
@@ -10,6 +11,8 @@ import { OperationTransition } from './operation-transition.type';
 export type OperationSnapshot = {
   readonly operationId: string;
   readonly strategyId: string;
+  /** Contexto de negocio fijado al abrir la operación, ver `Operation.context`. */
+  readonly context: StrategyGroup;
   readonly recommendedWinner: WinnerType;
   readonly streakWinner: WinnerType;
   readonly currentState: OperationState;

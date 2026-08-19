@@ -86,11 +86,13 @@ describe('ReportScheduler', () => {
       {
         operationId: 'op-1',
         strategyId: 'streak-3',
+        context: 'oficial',
         openedAt: new Date('2026-08-01T15:10:00.000Z'),
       },
       {
         operationId: 'op-2',
         strategyId: 'streak-3',
+        context: 'oficial',
         openedAt: new Date('2026-08-01T15:20:00.000Z'),
       },
     ]);
@@ -98,6 +100,7 @@ describe('ReportScheduler', () => {
       {
         operationId: 'op-1',
         strategyId: 'streak-3',
+        context: 'oficial',
         openedAt: new Date('2026-08-01T15:10:00.000Z'),
         closedAt: new Date('2026-08-01T15:15:00.000Z'),
         result: OperationState.WON,
@@ -128,15 +131,20 @@ describe('ReportScheduler', () => {
   });
 
   it('splits records between the oficial and pruebas snapshots, never mixing them', () => {
+    // El contexto es lo único que decide el grupo — no strategyId: ambos
+    // registros podrían venir de la misma estrategia (reasignada de canal
+    // entre uno y otro) y seguirían separándose correctamente.
     store.getOpenedBetween.mockReturnValue([
       {
         operationId: 'op-1',
-        strategyId: 'streak-3',
+        strategyId: 'streak-4',
+        context: 'oficial',
         openedAt: new Date('2026-08-01T15:10:00.000Z'),
       },
       {
         operationId: 'op-2',
         strategyId: 'streak-4',
+        context: 'pruebas',
         openedAt: new Date('2026-08-01T15:20:00.000Z'),
       },
     ]);
@@ -144,6 +152,7 @@ describe('ReportScheduler', () => {
       {
         operationId: 'op-2',
         strategyId: 'streak-4',
+        context: 'pruebas',
         openedAt: new Date('2026-08-01T15:20:00.000Z'),
         closedAt: new Date('2026-08-01T15:25:00.000Z'),
         result: OperationState.WON,
@@ -161,11 +170,11 @@ describe('ReportScheduler', () => {
     const oficial = events.find((report) => report.group === 'oficial')!;
     const pruebas = events.find((report) => report.group === 'pruebas')!;
 
-    expect(oficial.metrics.alertsSent).toBe(2);
-    expect(oficial.metrics.closedOperations).toBe(1);
-    expect(oficial.metrics.won).toBe(1);
-    expect(pruebas.metrics.alertsSent).toBe(0);
-    expect(pruebas.metrics.closedOperations).toBe(0);
+    expect(oficial.metrics.alertsSent).toBe(1);
+    expect(oficial.metrics.closedOperations).toBe(0);
+    expect(pruebas.metrics.alertsSent).toBe(1);
+    expect(pruebas.metrics.closedOperations).toBe(1);
+    expect(pruebas.metrics.won).toBe(1);
   });
 
   it('reschedules itself for the following hour after firing', () => {

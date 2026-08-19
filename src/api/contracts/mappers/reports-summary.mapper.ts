@@ -20,6 +20,5 @@ export function toReportsSummaryVm(
   return {
     uptimeMs: result.oficial.uptimeMs,
     oficial: toChannelSummary(result.oficial),
-    pruebas: toChannelSummary(result.pruebas),
   };
 }

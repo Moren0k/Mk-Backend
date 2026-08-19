@@ -1,13 +1,16 @@
 import { OperationState } from '../enums/operation-state.enum';
 import { WinnerType } from '../enums/winner-type.enum';
 import { Game } from '../history/game.type';
-import { StrategySignal } from '../strategy/types/strategy-signal.type';
+import { StrategyTrigger } from '../strategy/types/strategy-signal.type';
 import { Operation } from './operation.entity';
 
-function buildSignal(overrides: Partial<StrategySignal> = {}): StrategySignal {
+function buildSignal(
+  overrides: Partial<StrategyTrigger> = {},
+): StrategyTrigger {
   return {
     triggered: true,
     strategyId: 'streak-3',
+    context: 'oficial',
     strategyName: 'Streak3Strategy',
     triggeredAt: new Date('2026-08-01T00:00:00.000Z'),
     recommendedWinner: WinnerType.BANKER,
@@ -48,6 +51,17 @@ describe('Operation', () => {
     expect(operation.recommendedWinner).toBe(signal.recommendedWinner);
     expect(operation.reason).toBe('porque sí');
     expect(operation.operationId).toEqual(expect.any(String));
+  });
+
+  it('copies context from the trigger and keeps it fixed for the rest of its life', () => {
+    const operation = Operation.open(buildSignal({ context: 'pruebas' }));
+
+    expect(operation.context).toBe('pruebas');
+
+    operation.update(buildGame('1', WinnerType.BANKER));
+
+    expect(operation.context).toBe('pruebas');
+    expect(operation.toSnapshot().context).toBe('pruebas');
   });
 
   it('wins immediately when the first game matches the recommended winner', () => {
@@ -342,6 +356,7 @@ describe('Operation', () => {
     expect(snapshot).toEqual({
       operationId: operation.operationId,
       strategyId: operation.strategyId,
+      context: operation.context,
       recommendedWinner: operation.recommendedWinner,
       streakWinner: operation.streakWinner,
       currentState: OperationState.MARTINGALE_ONE,

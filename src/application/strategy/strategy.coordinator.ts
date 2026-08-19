@@ -111,7 +111,15 @@ export class StrategyCoordinator
       const result = strategy.evaluate(context);
 
       if (result.triggered) {
-        this.domainEventBus.publish(new StrategyTriggeredEvent(result));
+        // Garantizado no-undefined por el chequeo isActiveFor() de arriba:
+        // una estrategia solo llega aquí si está asignada a un canal. El
+        // fallback es puramente defensivo, nunca una fuente real de verdad.
+        const strategyContext =
+          this.configProvider.getChannelFor(strategy.id) ?? 'oficial';
+
+        this.domainEventBus.publish(
+          new StrategyTriggeredEvent({ ...result, context: strategyContext }),
+        );
       }
     } catch (error) {
       const message = `La estrategia "${strategy.name}" falló al evaluar.`;

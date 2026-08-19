@@ -107,6 +107,7 @@ describe('SummaryReportService', () => {
         {
           operationId: 'op-1',
           strategyId: 'streak-4',
+          context: 'oficial',
           openedAt: new Date('2026-08-01T15:00:00.000Z'),
         },
       ]);
@@ -124,23 +125,32 @@ describe('SummaryReportService', () => {
     });
   });
 
-  it('returns independent oficial/pruebas metrics, filtered by strategy group', () => {
+  it('returns independent oficial/pruebas metrics, filtered by the recorded context — never by strategyId', () => {
+    // Deliberado: ambos registros vienen de la MISMA estrategia
+    // ('streak-4'), como si hubiera sido reasignada de canal entre una
+    // operación y la siguiente. Si el filtro derivara del strategyId (el
+    // bug original), ambas terminarían en el mismo grupo. Con `context`
+    // grabado en cada registro, se separan correctamente sin importar la
+    // estrategia.
     store.getAllOpened.mockReturnValue([
       {
         operationId: 'op-1',
-        strategyId: 'streak-3',
+        strategyId: 'streak-4',
+        context: 'pruebas',
         openedAt: new Date('2026-08-01T15:00:00.000Z'),
       },
       {
         operationId: 'op-2',
         strategyId: 'streak-4',
+        context: 'oficial',
         openedAt: new Date('2026-08-01T15:00:00.000Z'),
       },
     ]);
     store.getAllClosed.mockReturnValue([
       {
         operationId: 'op-1',
-        strategyId: 'streak-3',
+        strategyId: 'streak-4',
+        context: 'pruebas',
         openedAt: new Date('2026-08-01T15:00:00.000Z'),
         closedAt: new Date('2026-08-01T15:05:00.000Z'),
         result: OperationState.WON,
@@ -150,6 +160,7 @@ describe('SummaryReportService', () => {
       {
         operationId: 'op-2',
         strategyId: 'streak-4',
+        context: 'oficial',
         openedAt: new Date('2026-08-01T15:00:00.000Z'),
         closedAt: new Date('2026-08-01T15:05:00.000Z'),
         result: OperationState.LOST,
@@ -161,10 +172,12 @@ describe('SummaryReportService', () => {
 
     const result = service.generateAndDispatch();
 
-    expect(result.oficial.alertsSent).toBe(2);
-    expect(result.oficial.won).toBe(1);
+    expect(result.oficial.alertsSent).toBe(1);
+    expect(result.oficial.won).toBe(0);
     expect(result.oficial.lost).toBe(1);
-    expect(result.pruebas.alertsSent).toBe(0);
+    expect(result.pruebas.alertsSent).toBe(1);
+    expect(result.pruebas.won).toBe(1);
+    expect(result.pruebas.lost).toBe(0);
   });
 
   it('sends only to the official channel, with only the official metrics, when selector is "oficial"', () => {
@@ -195,11 +208,13 @@ describe('SummaryReportService', () => {
       {
         operationId: 'op-1',
         strategyId: 'streak-3',
+        context: 'oficial',
         openedAt: new Date('2026-08-01T15:00:00.000Z'),
       },
       {
         operationId: 'op-2',
         strategyId: 'streak-4',
+        context: 'oficial',
         openedAt: new Date('2026-08-01T15:00:00.000Z'),
       },
     ]);

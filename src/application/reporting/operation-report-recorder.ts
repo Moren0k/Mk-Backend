@@ -78,6 +78,7 @@ export class OperationReportRecorder implements OnModuleInit, OnModuleDestroy {
     this.store.recordOpened({
       operationId: snapshot.operationId,
       strategyId: snapshot.strategyId,
+      context: snapshot.context,
       openedAt: snapshot.openedAt,
     });
   }
@@ -90,6 +91,7 @@ export class OperationReportRecorder implements OnModuleInit, OnModuleDestroy {
     this.store.recordClosed({
       operationId: snapshot.operationId,
       strategyId: snapshot.strategyId,
+      context: snapshot.context,
       openedAt: snapshot.openedAt,
       closedAt: snapshot.closedAt ?? new Date(),
       result: snapshot.currentState as OperationState.WON | OperationState.LOST,

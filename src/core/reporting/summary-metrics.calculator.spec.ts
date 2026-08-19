@@ -10,6 +10,7 @@ function buildOpened(
   return {
     operationId,
     strategyId: 'streak-3',
+    context: 'oficial',
     openedAt: new Date(openedAt),
   };
 }
@@ -22,6 +23,7 @@ function buildClosed(
   return {
     operationId,
     strategyId: 'streak-3',
+    context: 'oficial',
     openedAt: new Date(closedAt),
     closedAt: new Date(closedAt),
     result: OperationState.WON,

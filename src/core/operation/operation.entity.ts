@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { OperationState } from '../enums/operation-state.enum';
 import { WinnerType } from '../enums/winner-type.enum';
 import { Game } from '../history/game.type';
-import { StrategySignal } from '../strategy/types/strategy-signal.type';
+import { StrategyGroup } from '../strategy/strategy-group';
+import { StrategyTrigger } from '../strategy/types/strategy-signal.type';
 import { OperationSnapshot } from './types/operation-snapshot.type';
 import { OperationTransition } from './types/operation-transition.type';
 import { OperationUpdateResult } from './types/operation-update-result.type';
@@ -38,6 +39,15 @@ const MARTINGALE_STATE_BY_COUNT: Readonly<Record<number, OperationState>> = {
 export class Operation {
   readonly operationId: string;
   readonly strategyId: string;
+  /**
+   * Contexto de negocio ('oficial'/'pruebas') fijado una única vez al abrir
+   * esta Operation (ver `Operation.open`), a partir del canal vigente en
+   * `StrategyChannelRegistry` en ese instante. Nunca vuelve a recalcularse:
+   * es una propiedad histórica de la operación, independiente de la
+   * estrategia que la originó y de cualquier reasignación de canal
+   * posterior.
+   */
+  readonly context: StrategyGroup;
   readonly recommendedWinner: WinnerType;
   readonly streakWinner: WinnerType;
   readonly reason: string;
@@ -59,6 +69,7 @@ export class Operation {
   private constructor(
     operationId: string,
     strategyId: string,
+    context: StrategyGroup,
     recommendedWinner: WinnerType,
     streakWinner: WinnerType,
     maxMartingales: number,
@@ -68,6 +79,7 @@ export class Operation {
   ) {
     this.operationId = operationId;
     this.strategyId = strategyId;
+    this.context = context;
     this.recommendedWinner = recommendedWinner;
     this.streakWinner = streakWinner;
     this.maxMartingales = maxMartingales;
@@ -79,16 +91,19 @@ export class Operation {
   /**
    * Único punto de creación: una Operation nace siempre a partir de la
    * señal de una estrategia, con su propia identidad generada aquí mismo.
+   * `trigger.context` ya viene resuelto por StrategyCoordinator: esta clase
+   * solo lo copia, nunca lo deriva de `strategyId`.
    */
-  static open(signal: StrategySignal): Operation {
+  static open(trigger: StrategyTrigger): Operation {
     return new Operation(
       randomUUID(),
-      signal.strategyId,
-      signal.recommendedWinner,
-      signal.streakWinner,
-      signal.maxMartingales,
-      signal.triggerGameUuid,
-      signal.reason,
+      trigger.strategyId,
+      trigger.context,
+      trigger.recommendedWinner,
+      trigger.streakWinner,
+      trigger.maxMartingales,
+      trigger.triggerGameUuid,
+      trigger.reason,
       new Date(),
     );
   }
@@ -170,6 +185,7 @@ export class Operation {
     return Object.freeze({
       operationId: this.operationId,
       strategyId: this.strategyId,
+      context: this.context,
       recommendedWinner: this.recommendedWinner,
       streakWinner: this.streakWinner,
       currentState: this.state,

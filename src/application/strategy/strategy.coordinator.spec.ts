@@ -10,6 +10,7 @@ import { HistorySnapshot } from '../../core/interfaces/history-snapshot.interfac
 import { EngineErrorTracker } from '../../core/observability/engine-error-tracker';
 import { StrategyExecutionGuard } from '../../core/strategy/interfaces/strategy-execution-guard.interface';
 import { Strategy } from '../../core/strategy/interfaces/strategy.interface';
+import { StrategyGroup } from '../../core/strategy/strategy-group';
 import { StrategyResult } from '../../core/strategy/types/strategy-result.type';
 import { InMemoryStrategyRuntimeState } from './in-memory-strategy-runtime-state';
 import type { StrategyChannelRegistry } from './strategy-channel-registry';
@@ -62,6 +63,7 @@ const NO_SIGNAL: StrategyResult = { triggered: false };
 type MockConfigProvider = {
   getMaxMartingales: jest.Mock<number, [string, number]>;
   isActiveFor: jest.Mock<boolean, [string]>;
+  getChannelFor: jest.Mock<StrategyGroup | undefined, [string]>;
 };
 
 describe('StrategyCoordinator', () => {
@@ -88,6 +90,11 @@ describe('StrategyCoordinator', () => {
       // representando el caso "ya configurado vía API". El gate en sí se
       // prueba aparte, más abajo.
       isActiveFor: jest.fn<boolean, [string]>().mockReturnValue(true),
+      // Consistente con isActiveFor: por default, toda estrategia asignada
+      // lo está al canal "oficial".
+      getChannelFor: jest
+        .fn<StrategyGroup | undefined, [string]>()
+        .mockReturnValue('oficial'),
     };
 
     historyStore = {
@@ -251,6 +258,53 @@ describe('StrategyCoordinator', () => {
     });
   });
 
+  describe('context stamping (CONTEXTO != ESTRATEGIA)', () => {
+    const triggeringSignal: StrategyResult = {
+      triggered: true,
+      strategyId: 'streak-4',
+      strategyName: 'Streak4Strategy',
+      triggeredAt: new Date('2026-08-01T00:05:00.000Z'),
+      recommendedWinner: WinnerType.BANKER,
+      streakWinner: WinnerType.PLAYER,
+      maxMartingales: 2,
+      triggerGameUuid: '1',
+      reason: 'test',
+      metadata: {},
+    };
+
+    it('stamps context from StrategyChannelRegistry.getChannelFor, consulted at the exact instant of the signal', () => {
+      configProvider.getChannelFor.mockReturnValue('pruebas');
+      const strategy = buildStrategy('streak-4', triggeringSignal);
+      const coordinator = build([strategy]);
+
+      coordinator.handle(buildGameReceivedEvent('1'));
+
+      expect(configProvider.getChannelFor).toHaveBeenCalledWith('streak-4');
+      const [event] = domainEventBus.publish.mock.calls[0] as [
+        { payload: { context: string } },
+      ];
+      expect(event.payload.context).toBe('pruebas');
+    });
+
+    it('never derives context from strategyId: the same strategyId can stamp different contexts on different signals', () => {
+      const strategy = buildStrategy('streak-4', triggeringSignal);
+      const coordinator = build([strategy]);
+
+      configProvider.getChannelFor.mockReturnValue('oficial');
+      coordinator.handle(buildGameReceivedEvent('1'));
+
+      configProvider.getChannelFor.mockReturnValue('pruebas');
+      coordinator.handle(buildGameReceivedEvent('2'));
+
+      const contexts = (
+        domainEventBus.publish.mock.calls as [
+          { payload: { context: string } },
+        ][]
+      ).map(([event]) => event.payload.context);
+      expect(contexts).toEqual(['oficial', 'pruebas']);
+    });
+  });
+
   it('publishes a StrategyTriggeredEvent only for strategies that trigger', () => {
     const triggeringSignal: StrategyResult = {
       triggered: true,
@@ -274,7 +328,7 @@ describe('StrategyCoordinator', () => {
     expect(domainEventBus.publish).toHaveBeenCalledWith(
       expect.objectContaining({
         eventName: StrategyTriggeredEvent.eventName,
-        payload: triggeringSignal,
+        payload: { ...triggeringSignal, context: 'oficial' },
       }),
     );
   });

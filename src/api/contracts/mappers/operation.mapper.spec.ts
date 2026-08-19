@@ -9,6 +9,7 @@ function buildSnapshot(
   return {
     operationId: 'op-1',
     strategyId: 'streak-4',
+    context: 'oficial',
     recommendedWinner: WinnerType.BANKER,
     streakWinner: WinnerType.PLAYER,
     currentState: OperationState.OPEN,

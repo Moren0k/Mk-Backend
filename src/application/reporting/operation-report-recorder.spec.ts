@@ -14,6 +14,7 @@ function buildSnapshot(
   return {
     operationId: 'op-1',
     strategyId: 'streak-3',
+    context: 'oficial',
     recommendedWinner: WinnerType.BANKER,
     currentState: OperationState.OPEN,
     currentMartingale: 0,
@@ -95,6 +96,7 @@ describe('OperationReportRecorder', () => {
     expect(store.recordOpened).toHaveBeenCalledWith({
       operationId: 'op-42',
       strategyId: snapshot.strategyId,
+      context: snapshot.context,
       openedAt: snapshot.openedAt,
     });
   });
@@ -112,6 +114,7 @@ describe('OperationReportRecorder', () => {
     expect(store.recordClosed).toHaveBeenCalledWith({
       operationId: 'op-1',
       strategyId: snapshot.strategyId,
+      context: snapshot.context,
       openedAt: snapshot.openedAt,
       closedAt: snapshot.closedAt,
       result: OperationState.WON,
@@ -133,6 +136,7 @@ describe('OperationReportRecorder', () => {
     expect(store.recordClosed).toHaveBeenCalledWith({
       operationId: 'op-2',
       strategyId: snapshot.strategyId,
+      context: snapshot.context,
       openedAt: snapshot.openedAt,
       closedAt: snapshot.closedAt,
       result: OperationState.LOST,

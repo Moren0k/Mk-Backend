@@ -13,7 +13,7 @@ import { OperationState } from '../../core/enums/operation-state.enum';
 import { WinnerType } from '../../core/enums/winner-type.enum';
 import { Game } from '../../core/history/game.type';
 import { OperationSnapshot } from '../../core/operation/types/operation-snapshot.type';
-import { StrategySignal } from '../../core/strategy/types/strategy-signal.type';
+import { StrategyTrigger } from '../../core/strategy/types/strategy-signal.type';
 import { EngineMetricsService } from './engine-metrics.service';
 
 function buildGame(): Game {
@@ -25,10 +25,11 @@ function buildGame(): Game {
   };
 }
 
-function buildSignal(): StrategySignal {
+function buildSignal(): StrategyTrigger {
   return {
     triggered: true,
     strategyId: 'streak-3',
+    context: 'oficial',
     strategyName: 'Streak3Strategy',
     triggeredAt: new Date(),
     recommendedWinner: WinnerType.BANKER,
@@ -44,6 +45,7 @@ function buildSnapshot(): OperationSnapshot {
   return {
     operationId: 'op-1',
     strategyId: 'streak-3',
+    context: 'oficial',
     recommendedWinner: WinnerType.BANKER,
     streakWinner: WinnerType.PLAYER,
     currentState: OperationState.OPEN,

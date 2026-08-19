@@ -381,33 +381,46 @@ implementar `Strategy` directamente.
 significa este campo en los mensajes —, `maxMartingales`,
 `triggerGameUuid`, `reason`, `metadata`).
 
-**Los dos únicos puntos de registro reales** (patrón multi-provider manual,
-ver §8.3 y el comentario en `strategy.module.ts`):
-1. `StrategyModule` (`src/application/strategy/strategy.module.ts`):
-   importar la clase, sumarla a `providers`, a `inject` y al arreglo que
-   arma el `useFactory` de `STRATEGIES`. Los tres lugares deben coincidir
-   en el mismo orden — el error más común es actualizar `providers` y
-   olvidar `inject`/el arreglo del factory (o viceversa).
-2. `strategy-group.ts` (`src/core/strategy/strategy-group.ts`): **solo si**
-   la estrategia debe ir al canal de Pruebas, sumar su `id` a
-   `TEST_ONLY_STRATEGY_IDS`. Si va al canal Oficial, no tocar nada — es el
-   valor por defecto.
+**El único punto de registro real** (patrón multi-provider manual, ver §8.3
+y el comentario en `strategy.module.ts`): `StrategyModule`
+(`src/application/strategy/strategy.module.ts`) — importar la clase,
+sumarla a `providers`, a `inject` y al arreglo que arma el `useFactory` de
+`STRATEGIES`. Los tres lugares deben coincidir en el mismo orden — el error
+más común es actualizar `providers` y olvidar `inject`/el arreglo del
+factory (o viceversa).
+
+**A qué canal (oficial/pruebas) pertenece nunca se decide en código.** No
+existe (desde la corrección de 2026-08-18) ningún archivo estático
+equivalente a un antiguo `strategy-group.ts`/`TEST_ONLY_STRATEGY_IDS` que
+haya que editar al agregar una estrategia: toda estrategia nace sin ningún
+canal asignado, y el operador la asigna en runtime vía
+`PATCH /api/v1/channels/:channel` (`StrategyChannelRegistry`). El contexto
+('oficial'/'pruebas') de cada `Operation` se fija una única vez, en el
+instante exacto en que `StrategyCoordinator` publica su señal, consultando
+`StrategyChannelRegistry.getChannelFor(strategy.id)` — nunca se deriva de
+`strategyId` en ningún otro punto, ni siquiera en los reportes/resúmenes.
+Esto es deliberado: reasignar una estrategia a otro canal después no debe
+alterar el contexto de ninguna operación ya abierta o ya cerrada (ver
+`core/operation/operation.entity.ts` — campo `context` — y
+`core/reporting/report-group-filter.ts` — `filterByContext`).
 
 **Por qué nada más requiere cambios**: `NotificationFactory`,
 `NotificationChannelDispatcher`, `TelegramChannel`, `ReportScheduler`,
 `SummaryReportService`, `StatisticsService` y `EngineMetricsService` son
-todos genéricos por `strategyId` (o no conocen el concepto en absoluto).
-En cuanto la estrategia empiece a generar señales con su `id` correcto,
-las notificaciones, los reportes horario/bajo demanda y las métricas de
-motor la recogen automáticamente sin ningún cambio adicional.
+todos genéricos por `strategyId`/`context` (o no conocen el concepto en
+absoluto). En cuanto la estrategia empiece a generar señales con su `id`
+correcto y esté asignada a un canal activo, las notificaciones, los
+reportes horario/bajo demanda y las métricas de motor la recogen
+automáticamente sin ningún cambio adicional.
 
 **Buenas prácticas**:
 - `evaluate()` debe ser una función pura sobre su `context`: sin side
   effects, sin leer `process.env`, sin estado mutable en la propia
   instancia (usar siempre `context.runtimeState`).
 - No asumas que la estrategia puede elegir su propio canal — esa decisión
-  es exclusiva de `strategy-group.ts`. Una estrategia nunca debe conocer
-  `NotificationChannelType` ni Telegram.
+  es exclusiva de `StrategyChannelRegistry` (configurada vía
+  `PATCH /api/v1/channels/:channel`), nunca de un archivo de código. Una
+  estrategia nunca debe conocer `NotificationChannelType` ni Telegram.
 - Mientras se desarrolla, deja `enabled(): boolean { return false; }`
   hasta tener specs propios en verde y la suite completa (`pnpm test`)
   pasando; solo entonces cambiarlo a `true`.
@@ -416,9 +429,9 @@ motor la recogen automáticamente sin ningún cambio adicional.
 - Registrar la clase en `providers` de `StrategyModule` pero olvidarla en
   `inject`/el factory (o al revés): NestJS falla al resolver dependencias,
   o la estrategia nunca aparece en `STRATEGIES`.
-- Olvidar clasificarla en `strategy-group.ts` cuando debía ir a Pruebas:
-  por defecto cae en `'oficial'` y sus señales llegarían al canal
-  equivocado.
+- Olvidar asignarla a un canal vía `PATCH /api/v1/channels/:channel`: por
+  defecto no está asignada a ninguno, así que `StrategyCoordinator` nunca
+  la evalúa (ver `isActiveFor`), no que caiga "oficial por defecto".
 - Acumular el estado de detección en un campo de instancia en vez de
   `context.runtimeState`: rompe tanto el aislamiento por `strategyId` como
   la recuperación correcta tras un reinicio del proceso.

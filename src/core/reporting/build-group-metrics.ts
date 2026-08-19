@@ -1,5 +1,5 @@
 import { StrategyGroup } from '../strategy/strategy-group';
-import { filterByStrategyGroup } from './report-group-filter';
+import { filterByContext } from './report-group-filter';
 import { OperationClosedRecord } from './types/operation-closed-record.type';
 import { OperationOpenedRecord } from './types/operation-opened-record.type';
 
@@ -23,7 +23,7 @@ export function buildGroupMetrics<TMetrics>(
   ) => TMetrics,
 ): TMetrics {
   return calculate(
-    filterByStrategyGroup(opened, group),
-    filterByStrategyGroup(closed, group),
+    filterByContext(opened, group),
+    filterByContext(closed, group),
   );
 }

@@ -90,6 +90,17 @@ export class StrategyChannelRegistry implements StrategyConfigProvider {
   }
 
   /**
+   * Canal actualmente asignado a `strategyId`, si alguno — lookup inverso
+   * de `getStrategyIdForChannel`. Usado exclusivamente por
+   * `StrategyCoordinator` para estampar el contexto ('oficial'/'pruebas')
+   * en el instante exacto de una señal (ver `StrategyTrigger`), nunca para
+   * reclasificar una operación ya abierta o ya cerrada.
+   */
+  getChannelFor(strategyId: string): StrategyGroup | undefined {
+    return this.channelByStrategy.get(strategyId);
+  }
+
+  /**
    * A diferencia de `getMaxMartingales`, no recibe (ni asume) el default de
    * la Strategy: pensado para exponer el estado en `GET`/`PATCH
    * /api/v1/channels/:channel`, donde "sin override" debe reportarse tal

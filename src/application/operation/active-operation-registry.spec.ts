@@ -1,12 +1,15 @@
 import { WinnerType } from '../../core/enums/winner-type.enum';
 import { Operation } from '../../core/operation/operation.entity';
-import { StrategySignal } from '../../core/strategy/types/strategy-signal.type';
+import { StrategyTrigger } from '../../core/strategy/types/strategy-signal.type';
 import { ActiveOperationRegistry } from './active-operation-registry';
 
-function buildSignal(overrides: Partial<StrategySignal> = {}): StrategySignal {
+function buildSignal(
+  overrides: Partial<StrategyTrigger> = {},
+): StrategyTrigger {
   return {
     triggered: true,
     strategyId: 'streak-3',
+    context: 'oficial',
     strategyName: 'Streak3Strategy',
     triggeredAt: new Date('2026-08-01T00:00:00.000Z'),
     recommendedWinner: WinnerType.BANKER,

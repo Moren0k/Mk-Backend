@@ -38,7 +38,7 @@ function buildChannelSnapshot(
 }
 
 describe('toReportsSummaryVm', () => {
-  it('projects won/lost/alertsSent per channel and hoists uptimeMs to the root', () => {
+  it('projects won/lost/alertsSent for oficial and hoists uptimeMs to the root', () => {
     const result: SummaryReportResult = {
       oficial: buildChannelSnapshot({ won: 5, lost: 2, alertsSent: 7 }),
       pruebas: buildChannelSnapshot({
@@ -52,8 +52,16 @@ describe('toReportsSummaryVm', () => {
     expect(toReportsSummaryVm(result)).toEqual({
       uptimeMs: 3_600_000,
       oficial: { won: 5, lost: 2, alertsSent: 7 },
-      pruebas: { won: 1, lost: 3, alertsSent: 4 },
     });
+  });
+
+  it('never exposes the "pruebas" key, regardless of its values — the API is oficial-only by contract', () => {
+    const result: SummaryReportResult = {
+      oficial: buildChannelSnapshot(),
+      pruebas: buildChannelSnapshot({ won: 99, lost: 99, alertsSent: 99 }),
+    };
+
+    expect(toReportsSummaryVm(result)).not.toHaveProperty('pruebas');
   });
 
   it('drops every other internal metric field, keeping only won/lost/alertsSent per channel', () => {

@@ -13,14 +13,17 @@ import { OperationState } from '../../core/enums/operation-state.enum';
 import { WinnerType } from '../../core/enums/winner-type.enum';
 import { Game } from '../../core/history/game.type';
 import { EngineErrorTracker } from '../../core/observability/engine-error-tracker';
-import { StrategySignal } from '../../core/strategy/types/strategy-signal.type';
+import { StrategyTrigger } from '../../core/strategy/types/strategy-signal.type';
 import { ActiveOperationRegistry } from './active-operation-registry';
 import { OperationCoordinator } from './operation.coordinator';
 
-function buildSignal(overrides: Partial<StrategySignal> = {}): StrategySignal {
+function buildSignal(
+  overrides: Partial<StrategyTrigger> = {},
+): StrategyTrigger {
   return {
     triggered: true,
     strategyId: 'streak-3',
+    context: 'oficial',
     strategyName: 'Streak3Strategy',
     triggeredAt: new Date('2026-08-01T00:00:00.000Z'),
     recommendedWinner: WinnerType.BANKER,
@@ -100,7 +103,7 @@ describe('OperationCoordinator', () => {
     );
   });
 
-  function triggerStrategy(overrides: Partial<StrategySignal> = {}): void {
+  function triggerStrategy(overrides: Partial<StrategyTrigger> = {}): void {
     coordinator.onModuleInit();
     const handler = domainEventBus.subscribe.mock.calls.find(
       ([eventName]) => eventName === StrategyTriggeredEvent.eventName,

@@ -49,7 +49,7 @@ function buildSummaryReportService(): jest.Mocked<
 }
 
 describe('ReportsController', () => {
-  it('returns the summary snapshot mapped to ReportsSummaryVm, without dispatching anything', () => {
+  it('returns only the oficial summary mapped to ReportsSummaryVm, without dispatching anything', () => {
     const service = buildSummaryReportService();
     const controller = new ReportsController(
       service as unknown as SummaryReportService,
@@ -61,7 +61,17 @@ describe('ReportsController', () => {
     expect(result).toEqual({
       uptimeMs: 1_000,
       oficial: { won: 3, lost: 1, alertsSent: 4 },
-      pruebas: { won: 0, lost: 0, alertsSent: 0 },
     });
+  });
+
+  it('never exposes pruebas data through this endpoint (API → oficial solamente)', () => {
+    const service = buildSummaryReportService();
+    const controller = new ReportsController(
+      service as unknown as SummaryReportService,
+    );
+
+    const result = controller.getSummary();
+
+    expect(result).not.toHaveProperty('pruebas');
   });
 });
