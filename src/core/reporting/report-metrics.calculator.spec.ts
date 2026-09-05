@@ -36,6 +36,7 @@ describe('calculateReportMetrics', () => {
       won: 0,
       lost: 0,
       effectivenessPct: 0,
+      netUnits: 0,
       directWins: 0,
       martingaleOneWins: 0,
       martingaleTwoWins: 0,
@@ -163,5 +164,25 @@ describe('calculateReportMetrics', () => {
     expect(metrics.effectivenessPct).toBe(0);
     expect(metrics.distribution.directPct).toBe(0);
     expect(metrics.distribution.lostPct).toBe(0);
+  });
+
+  it('computes netUnits as won - lost * 7 (progresión de martingala 1+2+4)', () => {
+    const closed = [
+      buildClosed({ operationId: 'a', result: OperationState.WON }),
+      buildClosed({ operationId: 'b', result: OperationState.WON }),
+      buildClosed({
+        operationId: 'c',
+        result: OperationState.LOST,
+        martingalesUsed: 2,
+      }),
+    ];
+
+    const metrics = calculateReportMetrics([], closed);
+
+    expect(metrics.netUnits).toBe(2 - 1 * 7);
+  });
+
+  it('netUnits is 0 for an empty window', () => {
+    expect(calculateReportMetrics([], []).netUnits).toBe(0);
   });
 });

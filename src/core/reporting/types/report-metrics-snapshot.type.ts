@@ -10,6 +10,10 @@ export type ReportMetricsSnapshot = {
   readonly won: number;
   readonly lost: number;
   readonly effectivenessPct: number;
+  /** `won - lost * 7` (progresión de martingala 1+2+4: una pérdida agota
+   *  las 3 fases, 7 unidades apostadas en total; una victoria siempre
+   *  cierra con 1 unidad neta, sin importar en qué fase ganó). */
+  readonly netUnits: number;
   readonly directWins: number;
   readonly martingaleOneWins: number;
   readonly martingaleTwoWins: number;

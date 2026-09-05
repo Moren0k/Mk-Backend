@@ -162,6 +162,10 @@ describe('Context independence (CONTEXTO != ESTRATEGIA, end-to-end)', () => {
       [oficialChannel, pruebasChannel],
       new NotificationFactory(),
       errorTracker,
+      {
+        loadAll: () => Promise.resolve([]),
+        save: () => Promise.resolve(undefined),
+      },
     );
 
     strategyCoordinator.onModuleInit();
@@ -243,7 +247,7 @@ describe('Context independence (CONTEXTO != ESTRATEGIA, end-to-end)', () => {
     const apiResponse = toReportsSummaryVm(snapshot);
     expect(apiResponse).toEqual({
       uptimeMs: snapshot.oficial.uptimeMs,
-      oficial: { won: 1, lost: 0, alertsSent: 1 },
+      oficial: { won: 1, lost: 0, alertsSent: 1, netUnits: 1 },
     });
     expect(apiResponse).not.toHaveProperty('pruebas');
   });

@@ -13,3 +13,4 @@ export const TELEGRAM_OFFICIAL_CHANNEL = Symbol('TelegramOfficialChannel');
 export const TELEGRAM_TEST_CHANNEL = Symbol('TelegramTestChannel');
 export const STRATEGY_EXECUTION_GUARD = Symbol('StrategyExecutionGuard');
 export const OPERATION_REPORT_STORE = Symbol('OperationReportStore');
+export const REPORT_CHECKPOINT_STORE = Symbol('ReportCheckpointStore');

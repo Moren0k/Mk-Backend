@@ -405,16 +405,17 @@ Sin query params, sin body. Siempre trae ambos canales en la misma respuesta.
 {
   "data": {
     "uptimeMs": 7384521,
-    "oficial": { "won": 8, "lost": 2, "alertsSent": 10 },
-    "pruebas": { "won": 0, "lost": 0, "alertsSent": 0 }
+    "oficial": { "won": 8, "lost": 2, "alertsSent": 10, "netUnits": -6 }
   },
   "requestId": "…"
 }
 ```
 
-- `uptimeMs`: milisegundos desde que arrancó **el proceso** (no desde que se activó un canal) — es el mismo valor en `oficial` y `pruebas`, se expone una sola vez.
-- `won`/`lost`/`alertsSent`: acumulado de **todo el historial en memoria desde que arrancó el proceso** (mismo criterio que `POST /admin/reports` y que el comando legado `RESUMEN`) — nunca se resetea salvo reinicio, no es una ventana de tiempo.
-- Si querés más detalle (`effectivenessPct`, `directWins`, `martingaleOneWins`, distribución, mejores/peores rachas, etc.), esos campos siguen existiendo internamente (`SummaryMetricsSnapshot`) pero **no se exponen acá a propósito** — este endpoint solo proyecta los tres números que se pidieron para el dashboard. Si el frontend necesita el detalle completo, usa `POST /api/v1/admin/reports` (§4.9) sabiendo que esa llamada sí dispara Telegram.
+- `uptimeMs`: milisegundos desde que arrancó **el proceso** (no desde que se activó un canal).
+- `won`/`lost`/`alertsSent`: acumulado de **todo el historial** (mismo criterio que `POST /admin/reports` y que el comando legado `RESUMEN`), no es una ventana de tiempo. Desde el 2026-09-05 **sobrevive un reinicio/redeploy del proceso**: se respalda periódicamente en la tabla `report_checkpoints` (Postgres/Supabase, ver `DATABASE.md` §10) y se restaura al arrancar — el contrato HTTP no cambia, solo deja de perderse el acumulado cuando el proceso se reinicia (p. ej. un redeploy en Vercel/Railway).
+- `netUnits`: `won - lost * 7` — unidades reales de ganancia/pérdida, calculadas **solo** sobre lo contado en `oficial` (nunca mezcla `pruebas`, que ni siquiera viaja en este contrato — ver más abajo). El `7` es la progresión de martingala del motor (`OPEN` 1 unidad + `MG1` 2 + `MG2` 4 = 7 unidades apostadas en total si se pierde la operación completa); una victoria siempre cierra dejando 1 unidad neta, sin importar en qué fase ganó (directa, MG1 o MG2). Se calcula en `core/reporting/report-metrics.calculator.ts` (`calculateReportMetrics`), la misma función que produce `won`/`lost`, así que viaja también en `SummaryMetricsSnapshot` y en el detalle interno de `POST /admin/reports` — acá solo se proyecta.
+- **Este contrato solo expone `oficial`** (no hay clave `pruebas` en la respuesta, por diseño — ver el comentario en `reports-summary.vm.ts`), así que `netUnits` es también, por construcción, exclusivamente sobre lo que se notificó por el canal oficial.
+- Si querés más detalle (`effectivenessPct`, `directWins`, `martingaleOneWins`, distribución, mejores/peores rachas, etc.), esos campos siguen existiendo internamente (`SummaryMetricsSnapshot`) pero **no se exponen acá a propósito** — este endpoint solo proyecta los cuatro números que se pidieron para el dashboard. Si el frontend necesita el detalle completo, usa `POST /api/v1/admin/reports` (§4.9) sabiendo que esa llamada sí dispara Telegram.
 
 ---
 

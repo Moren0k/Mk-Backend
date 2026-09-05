@@ -16,6 +16,10 @@ export type ReportsChannelSummaryVm = {
   readonly won: number;
   readonly lost: number;
   readonly alertsSent: number;
+  /** `won - lost * 7`: unidades reales de ganancia/pérdida (progresión de
+   *  martingala 1+2+4 — una pérdida cuesta las 7 unidades de la
+   *  progresión completa, una victoria siempre deja 1 unidad neta). */
+  readonly netUnits: number;
 };
 
 export type ReportsSummaryVm = {

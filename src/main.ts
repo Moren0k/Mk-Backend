@@ -9,6 +9,7 @@ import helmet from '@fastify/helmet';
 
 import { AppModule } from './app.module';
 import { EngineHealth } from './application/observability/engine-health';
+import { SummaryReportService } from './application/reporting/summary-report.service';
 import { StatisticsService } from './application/statistics/statistics.service';
 import { GameEventCollector } from './infrastructure/collector/game-event-collector';
 
@@ -82,7 +83,15 @@ async function bootstrap(): Promise<void> {
   // EngineMetrics ya están suscritos al DomainEventBus). Solo después de
   // eso arrancamos el collector explícitamente: así la carga inicial de
   // partidas nunca puede perderse, sin depender del orden de `imports`.
+  //
+  // hydrateFromCheckpoint() corre ANTES que collector.start(), por el
+  // mismo motivo: restaura won/lost/alertsSent/uptime desde el checkpoint
+  // persistido (tabla report_checkpoints, ver DATABASE.md) antes de que
+  // pueda llegar y cerrarse cualquier operación real — así ningún reinicio
+  // o redeploy del proceso pierde el acumulado que expone
+  // GET /api/v1/reports/summary.
   await app.listen(port, '0.0.0.0');
+  await app.get(SummaryReportService).hydrateFromCheckpoint();
   await app.get(GameEventCollector).start();
 
   logStartupSnapshot(app);

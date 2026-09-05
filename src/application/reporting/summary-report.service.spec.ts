@@ -10,6 +10,7 @@ import {
 } from '../../core/notification/notification.type';
 import { EngineErrorTracker } from '../../core/observability/engine-error-tracker';
 import type { OperationReportStore } from '../../core/reporting/interfaces/operation-report-store.interface';
+import type { ReportCheckpointStore } from '../../core/reporting/interfaces/report-checkpoint-store.interface';
 import { SummaryReportService } from './summary-report.service';
 
 function buildNotification(channel: NotificationChannelType): Notification {
@@ -52,6 +53,7 @@ describe('SummaryReportService', () => {
     Pick<NotificationFactory, 'createForSummaryReport'>
   >;
   let errorTracker: EngineErrorTracker;
+  let checkpointStore: jest.Mocked<ReportCheckpointStore>;
 
   beforeEach(() => {
     domainEventBus = {
@@ -78,6 +80,10 @@ describe('SummaryReportService', () => {
         ),
     };
     errorTracker = new EngineErrorTracker();
+    checkpointStore = {
+      loadAll: jest.fn().mockResolvedValue([]),
+      save: jest.fn().mockResolvedValue(undefined),
+    };
   });
 
   function build(channels: NotificationChannel[]): SummaryReportService {
@@ -87,6 +93,7 @@ describe('SummaryReportService', () => {
       channels,
       notificationFactory as unknown as NotificationFactory,
       errorTracker,
+      checkpointStore,
     );
   }
 
@@ -260,5 +267,125 @@ describe('SummaryReportService', () => {
 
     expect(official.send).toHaveBeenCalledTimes(1);
     expect(test.send).toHaveBeenCalledTimes(1);
+  });
+
+  describe('hydrateFromCheckpoint()', () => {
+    it('adds the persisted won/lost/alertsSent as an offset to the next getSnapshot()', async () => {
+      checkpointStore.loadAll.mockResolvedValue([
+        {
+          channel: 'oficial',
+          won: 8,
+          lost: 2,
+          alertsSent: 10,
+          firstStartedAt: new Date('2026-08-01T00:00:00.000Z'),
+        },
+      ]);
+      store.getAllClosed.mockReturnValue([
+        {
+          operationId: 'op-1',
+          strategyId: 'streak-4',
+          context: 'oficial',
+          openedAt: new Date('2026-08-01T15:00:00.000Z'),
+          closedAt: new Date('2026-08-01T15:05:00.000Z'),
+          result: OperationState.WON,
+          martingalesUsed: 0,
+          maxMartingales: 2,
+        },
+      ]);
+      const service = build([]);
+
+      await service.hydrateFromCheckpoint();
+      const snapshot = service.getSnapshot(
+        new Date('2026-08-01T15:10:00.000Z'),
+      );
+
+      expect(snapshot.oficial.won).toBe(9); // 8 persistidas + 1 en memoria
+      expect(snapshot.oficial.lost).toBe(2);
+      expect(snapshot.pruebas.won).toBe(0); // sin checkpoint propio, sin offset
+    });
+
+    it('recomputes netUnits and effectivenessPct over the combined won/lost, not just the in-memory ones', async () => {
+      checkpointStore.loadAll.mockResolvedValue([
+        {
+          channel: 'oficial',
+          won: 8,
+          lost: 2,
+          alertsSent: 10,
+          firstStartedAt: new Date('2026-08-01T00:00:00.000Z'),
+        },
+      ]);
+      const service = build([]);
+
+      await service.hydrateFromCheckpoint();
+      const snapshot = service.getSnapshot(
+        new Date('2026-08-01T15:10:00.000Z'),
+      );
+
+      expect(snapshot.oficial.netUnits).toBe(8 - 2 * 7);
+      expect(snapshot.oficial.effectivenessPct).toBeCloseTo(80, 2);
+    });
+
+    it('computes uptimeMs from the persisted firstStartedAt, not from this process start', async () => {
+      const firstStartedAt = new Date('2026-08-01T00:00:00.000Z');
+      checkpointStore.loadAll.mockResolvedValue([
+        { channel: 'oficial', won: 0, lost: 0, alertsSent: 0, firstStartedAt },
+      ]);
+      const service = build([]);
+
+      await service.hydrateFromCheckpoint();
+      const now = new Date('2026-08-01T02:00:00.000Z');
+      const snapshot = service.getSnapshot(now);
+
+      expect(snapshot.oficial.uptimeMs).toBe(2 * 60 * 60 * 1000);
+    });
+
+    it('never throws even if the checkpoint store is empty (fresh deploy, no prior checkpoint)', async () => {
+      const service = build([]);
+
+      await expect(service.hydrateFromCheckpoint()).resolves.toBeUndefined();
+      expect(service.getSnapshot().oficial.won).toBe(0);
+    });
+  });
+
+  describe('persistCheckpoint()', () => {
+    it('saves the combined won/lost/alertsSent (offset + in-memory) for both channels', async () => {
+      store.getAllClosed.mockReturnValue([
+        {
+          operationId: 'op-1',
+          strategyId: 'streak-4',
+          context: 'oficial',
+          openedAt: new Date('2026-08-01T15:00:00.000Z'),
+          closedAt: new Date('2026-08-01T15:05:00.000Z'),
+          result: OperationState.WON,
+          martingalesUsed: 0,
+          maxMartingales: 2,
+        },
+      ]);
+      const service = build([]);
+
+      await service.persistCheckpoint(new Date('2026-08-01T16:00:00.000Z'));
+
+      expect(checkpointStore.save).toHaveBeenCalledWith(
+        expect.objectContaining({ channel: 'oficial', won: 1, lost: 0 }),
+      );
+      expect(checkpointStore.save).toHaveBeenCalledWith(
+        expect.objectContaining({ channel: 'pruebas', won: 0, lost: 0 }),
+      );
+    });
+
+    it('keeps the originally persisted firstStartedAt across saves, never overwriting it with "now"', async () => {
+      const firstStartedAt = new Date('2026-08-01T00:00:00.000Z');
+      checkpointStore.loadAll.mockResolvedValue([
+        { channel: 'oficial', won: 0, lost: 0, alertsSent: 0, firstStartedAt },
+      ]);
+      const service = build([]);
+      await service.hydrateFromCheckpoint();
+
+      await service.persistCheckpoint(new Date('2026-08-01T05:00:00.000Z'));
+
+      expect(checkpointStore.save).toHaveBeenCalledWith(
+        expect.objectContaining({ channel: 'oficial', firstStartedAt }),
+      );
+    });
   });
 });

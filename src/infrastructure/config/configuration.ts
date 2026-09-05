@@ -77,4 +77,13 @@ export default () => ({
     url: process.env.DATABASE_URL,
     directUrl: process.env.DIRECT_URL,
   },
+  report: {
+    // Cada cuánto ReportCheckpointScheduler persiste won/lost/alertsSent
+    // por canal en la tabla report_checkpoints (ver DATABASE.md). Default
+    // 10 minutos (600000 ms) si no está definida.
+    checkpointIntervalMs: parseInt(
+      process.env.REPORT_CHECKPOINT_INTERVAL_MS ?? '600000',
+      10,
+    ),
+  },
 });

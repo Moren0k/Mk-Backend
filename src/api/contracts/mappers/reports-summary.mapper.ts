@@ -11,6 +11,7 @@ function toChannelSummary(
     won: snapshot.won,
     lost: snapshot.lost,
     alertsSent: snapshot.alertsSent,
+    netUnits: snapshot.netUnits,
   };
 }
 

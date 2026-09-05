@@ -5,6 +5,11 @@ import { ReportMetricsSnapshot } from './types/report-metrics-snapshot.type';
 
 const PERCENTAGE_PRECISION = 100;
 
+/** Unidades apostadas en una pérdida que agota la progresión (base 1 + MG1 2 + MG2 4).
+ *  Exportada para que SummaryReportService recalcule netUnits con el mismo
+ *  criterio al combinar el checkpoint persistido con lo ocurrido en memoria. */
+export const LOSS_UNIT_MULTIPLIER = 7;
+
 /**
  * Calcula las métricas de un reporte a partir de los registros crudos de
  * una ventana de tiempo. Función pura, sin estado: mismo patrón que
@@ -53,6 +58,7 @@ export function calculateReportMetrics(
     won,
     lost,
     effectivenessPct: rate(won, closedOperations),
+    netUnits: won - lost * LOSS_UNIT_MULTIPLIER,
     directWins,
     martingaleOneWins,
     martingaleTwoWins,

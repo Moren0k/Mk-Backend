@@ -66,3 +66,32 @@ model Jugada {
   @@index([jugadaEn(sort: Desc)])
   @@index([ganador, jugadaEn])
 }
+
+/// Checkpoint periódico de los contadores agregados de reporte (ganadas,
+/// perdidas, alertas enviadas) por canal ("oficial"/"pruebas" — ver
+/// StrategyGroup), para que GET /api/v1/reports/summary sobreviva a un
+/// reinicio/redeploy del proceso sin perder el acumulado: ver
+/// ReportCheckpointScheduler (guarda cada cierto tiempo) y
+/// SummaryReportService.hydrateFromCheckpoint (lee al arrancar, antes de
+/// GameEventCollector.start() — ver main.ts). Deliberadamente mínima, igual
+/// criterio que `Jugada`: solo contadores agregados, nunca el detalle de
+/// cada Operation (rachas, distribución, martingalas) — ese detalle vuelve
+/// a construirse desde cero en memoria durante la vida de cada proceso.
+model ReportCheckpoint {
+  /// "oficial" | "pruebas" (StrategyGroup). PK: una fila por canal.
+  channel String @id @db.VarChar(20)
+
+  won        Int @default(0)
+  lost       Int @default(0)
+  alertsSent Int @default(0) @map("alerts_sent")
+
+  /// Instante del primer arranque real que llegó a persistir este canal.
+  /// Se fija una única vez al crear la fila (save/upsert nunca la
+  /// modifica en un `update`) para que `uptimeMs` refleje tiempo
+  /// acumulado real entre despliegues, no solo desde el último reinicio.
+  firstStartedAt DateTime @map("first_started_at") @db.Timestamptz(3)
+
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("report_checkpoints")
+}

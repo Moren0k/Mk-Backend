@@ -11,6 +11,7 @@ function buildChannelSnapshot(
     won: 0,
     lost: 0,
     effectivenessPct: 0,
+    netUnits: 0,
     directWins: 0,
     martingaleOneWins: 0,
     martingaleTwoWins: 0,
@@ -42,7 +43,12 @@ function buildSummaryReportService(): jest.Mocked<
 > {
   return {
     getSnapshot: jest.fn().mockReturnValue({
-      oficial: buildChannelSnapshot({ won: 3, lost: 1, alertsSent: 4 }),
+      oficial: buildChannelSnapshot({
+        won: 3,
+        lost: 1,
+        alertsSent: 4,
+        netUnits: 3 - 1 * 7,
+      }),
       pruebas: buildChannelSnapshot({ won: 0, lost: 0, alertsSent: 0 }),
     }),
   };
@@ -60,7 +66,7 @@ describe('ReportsController', () => {
     expect(service.getSnapshot).toHaveBeenCalledTimes(1);
     expect(result).toEqual({
       uptimeMs: 1_000,
-      oficial: { won: 3, lost: 1, alertsSent: 4 },
+      oficial: { won: 3, lost: 1, alertsSent: 4, netUnits: -4 },
     });
   });
 

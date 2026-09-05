@@ -11,6 +11,7 @@ function buildChannelSnapshot(
     won: 0,
     lost: 0,
     effectivenessPct: 0,
+    netUnits: 0,
     directWins: 0,
     martingaleOneWins: 0,
     martingaleTwoWins: 0,
@@ -38,9 +39,14 @@ function buildChannelSnapshot(
 }
 
 describe('toReportsSummaryVm', () => {
-  it('projects won/lost/alertsSent for oficial and hoists uptimeMs to the root', () => {
+  it('projects won/lost/alertsSent/netUnits for oficial and hoists uptimeMs to the root', () => {
     const result: SummaryReportResult = {
-      oficial: buildChannelSnapshot({ won: 5, lost: 2, alertsSent: 7 }),
+      oficial: buildChannelSnapshot({
+        won: 5,
+        lost: 2,
+        alertsSent: 7,
+        netUnits: 5 - 2 * 7,
+      }),
       pruebas: buildChannelSnapshot({
         won: 1,
         lost: 3,
@@ -51,7 +57,7 @@ describe('toReportsSummaryVm', () => {
 
     expect(toReportsSummaryVm(result)).toEqual({
       uptimeMs: 3_600_000,
-      oficial: { won: 5, lost: 2, alertsSent: 7 },
+      oficial: { won: 5, lost: 2, alertsSent: 7, netUnits: -9 },
     });
   });
 

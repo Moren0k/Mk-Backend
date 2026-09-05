@@ -1,6 +1,6 @@
 # DATABASE.md — Guía de la base de datos (PostgreSQL / Supabase)
 
-> Estado al 2026-08-06: la infraestructura de conexión (Prisma + Supabase) está implementada y la tabla `jugadas` **ya existe en la base real**, con el esquema descrito abajo (1 migración aplicada, 0 filas — todavía no hay un servicio que la pueble). Este documento reemplaza al análisis previo (`SCHEMA_JUGADAS.md`, ya retirado): es la referencia única, actualizada, tanto para entender el diseño como para conectarse y consultar los datos.
+> Estado al 2026-09-05: dos tablas reales en la base. `jugadas` (migración `20260806040514_init_jugadas`, esquema descrito en la §4) y `report_checkpoints` (migración `20260905212238_add_report_checkpoints`, ver §10) — esta última sí tiene un servicio real que la puebla (`ReportCheckpointScheduler`/`SummaryReportService`, ver `src/application/reporting/`). Este documento reemplaza al análisis previo (`SCHEMA_JUGADAS.md`, ya retirado): es la referencia única, actualizada, tanto para entender el diseño como para conectarse y consultar los datos.
 
 ![Diagrama de la tabla jugadas](docs/Database.png)
 
@@ -221,3 +221,43 @@ end note
 1. Resolver (o aceptar posponer) las preguntas de §8 — ninguna bloquea el uso actual de la tabla.
 2. Implementar el servicio real de captura que inserte en `jugadas` desde `GameEventCollector` (hoy solo escribe en el `HistoryStore` en memoria).
 3. Mantener este documento como referencia única de la base de datos — si el esquema cambia, actualizar aquí, no crear un documento de análisis paralelo.
+
+---
+
+## 10. `report_checkpoints` (implementada, migración `20260905212238_add_report_checkpoints`)
+
+Resuelve un problema real de `SummaryReportService`/`GET /api/v1/reports/summary` (§4.10 de `documentacion_mk_api.md`): `won`/`lost`/`alertsSent`/`uptimeMs` viven en memoria (`InMemoryOperationReportStore`), así que un reinicio o redeploy del proceso (Vercel, Railway, o simplemente reiniciar `pnpm start:prod`) los vuelve a cero. Esta tabla guarda un **checkpoint periódico** de esos contadores para que el motor pueda "retomar donde iba" al arrancar de nuevo.
+
+```
+┌──────────────────────────────────────────────────────┐
+│                report_checkpoints                     │
+├──────────────────────────────────────────────────────┤
+│ channel            VARCHAR(20)   PK ("oficial"/"pruebas")│
+│ won                INTEGER       NOT NULL, DEFAULT 0  │
+│ lost               INTEGER       NOT NULL, DEFAULT 0  │
+│ alerts_sent        INTEGER       NOT NULL, DEFAULT 0  │
+│ first_started_at   TIMESTAMPTZ   NOT NULL             │
+│ updated_at         TIMESTAMPTZ   NOT NULL             │
+└──────────────────────────────────────────────────────┘
+```
+
+- **Una fila por canal** (`oficial`/`pruebas`, ver `StrategyGroup`) — como máximo 2 filas.
+- **`first_started_at` se fija una única vez**, al crear la fila (`INSERT`), y nunca se vuelve a escribir en los `UPDATE` posteriores (ver `PrismaReportCheckpointStore.save`, que separa `create`/`update` explícitamente en el `upsert`). Es lo que permite que `uptimeMs` refleje tiempo acumulado real entre despliegues, no solo desde el último reinicio del proceso.
+- **Deliberadamente mínima** — mismo criterio que `jugadas` (§6): solo los 3 contadores agregados que expone la API pública (`won`, `lost`, `alertsSent`), nunca el detalle de cada `Operation` (rachas, distribución directa/MG1/MG2, martingalas usadas, horas destacadas — ver `SummaryMetricsSnapshot`). Ese detalle fino se sigue calculando solo en memoria durante la vida de cada proceso, desde `InMemoryOperationReportStore`, y **no sobrevive** un reinicio — solo won/lost/alertsSent/uptime lo hacen.
+
+**Cómo se escribe y se lee (código relevante):**
+
+| Pieza | Rol |
+|---|---|
+| `core/reporting/interfaces/report-checkpoint-store.interface.ts` | Contrato `ReportCheckpointStore` (`loadAll`/`save`), puro TypeScript — `core/` nunca importa Prisma. |
+| `infrastructure/persistence/prisma-report-checkpoint-store.ts` | Implementación real (`PrismaReportCheckpointStore`). Nunca lanza: si Supabase no está disponible, `loadAll()` devuelve `[]` y `save()` solo loguea un `warn` — el motor sigue funcionando exactamente igual, sin checkpoint, mismo criterio que `PrismaService`. |
+| `application/reporting/summary-report.service.ts` | `hydrateFromCheckpoint()` carga el offset al arrancar; `persistCheckpoint()` guarda el acumulado actual (offset + lo ocurrido en memoria desde que arrancó este proceso); `getSnapshot()`/`generateAndDispatch()` ya devuelven won/lost/alertsSent/uptimeMs **combinados** con ese offset. |
+| `application/reporting/report-checkpoint.scheduler.ts` | `ReportCheckpointScheduler`: guarda el checkpoint cada `REPORT_CHECKPOINT_INTERVAL_MS` (default 10 minutos, `.env.example`) vía `setInterval` — intervalo puramente técnico, no alineado a ninguna hora de reloj (a diferencia de `ReportScheduler`, el reporte horario). |
+| `main.ts` | Llama `summaryReportService.hydrateFromCheckpoint()` explícitamente, después de `app.listen()` pero **antes** de `GameEventCollector.start()` — mismo criterio documentado en `ARCHITECTURE.md` §8 para el propio collector: así ninguna operación real puede cerrarse y contarse antes de que el offset esté cargado. |
+
+**Qué pasa sin `DATABASE_URL`/`DIRECT_URL` configuradas, o si Supabase está caído**: exactamente el comportamiento actual, sin checkpoint — `hydrateFromCheckpoint()` no encuentra filas (offset en cero) y `persistCheckpoint()` no logra nada (solo un `warn` en el log cada intento); el motor de detección de rachas/alertas nunca depende de esta tabla para funcionar.
+
+```sql
+SELECT * FROM report_checkpoints;                          -- estado actual de ambos canales
+SELECT won, lost, alerts_sent FROM report_checkpoints WHERE channel = 'oficial';
+```
