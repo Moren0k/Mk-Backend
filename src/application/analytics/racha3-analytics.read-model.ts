@@ -16,9 +16,11 @@ import type {
   Racha3Filtros,
   Racha3Intervalo,
   Racha3IntervaloMetrica,
+  Racha3LadosJugadas,
   Racha3PorDia,
   Racha3PorHora,
   Racha3Resumen,
+  Racha3TiesNivel,
 } from '../../core/analytics/types/racha3-analytics.type';
 import type { Racha3RunResult } from '../../core/analytics/types/racha3-run.type';
 
@@ -99,6 +101,32 @@ export class Racha3AnalyticsReadModel {
 
   estado(): Promise<Racha3Estado> {
     return this.reader.estado();
+  }
+
+  /**
+   * Distribución de ganadores sobre `jugadas` hasta el checkpoint.
+   *
+   * Es la segunda fuente de evidencia de Racha 3 Test: con ~39.000 rondas
+   * no-empate estima la ventaja del lado apostado nueve veces mejor que
+   * contando victorias de operaciones completas (~4.200).
+   */
+  ladosJugadas(filtros: Racha3Filtros): Promise<Racha3LadosJugadas> {
+    return this.reader.ladosJugadas(filtros);
+  }
+
+  /**
+   * Empates dentro de operaciones, por nivel de la escalera.
+   *
+   * Un empate devuelve el 90 %, así que cuesta el 10 % de lo apostado en el
+   * nivel donde cae — y la apuesta se duplica en cada nivel. Sin este dato
+   * el punto de equilibrio se subestima en medio punto (87,500 % contra
+   * 87,983 %), que es justo el margen donde vive esta estrategia.
+   */
+  tiesPorNivel(
+    apuesta: 'PLAYER' | 'BANKER' | undefined,
+    filtros: Racha3Filtros,
+  ): Promise<readonly Racha3TiesNivel[]> {
+    return this.reader.tiesPorNivel(apuesta, filtros);
   }
 
   /**

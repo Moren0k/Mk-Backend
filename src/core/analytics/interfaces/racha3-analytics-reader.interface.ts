@@ -8,9 +8,11 @@ import {
   Racha3Filtros,
   Racha3Intervalo,
   Racha3IntervaloMetrica,
+  Racha3LadosJugadas,
   Racha3PorDia,
   Racha3PorHora,
   Racha3Resumen,
+  Racha3TiesNivel,
 } from '../types/racha3-analytics.type';
 
 /**
@@ -65,4 +67,21 @@ export interface Racha3AnalyticsReader {
   ): Promise<readonly Racha3ColumnaDistribucion[]>;
 
   estado(): Promise<Racha3Estado>;
+
+  /**
+   * Distribución de ganadores sobre `jugadas` hasta el checkpoint. Es la
+   * segunda fuente de evidencia de Racha 3 Test: permite estimar la ventaja
+   * del lado apostado con ~9x más muestra que contando operaciones.
+   */
+  ladosJugadas(filtros: Racha3Filtros): Promise<Racha3LadosJugadas>;
+
+  /**
+   * Empates dentro de operaciones, por nivel de la escalera. Necesarios
+   * para el peaje del empate, que mueve el punto de equilibrio de 87,500 %
+   * a 87,983 % y por tanto decide si una apuesta es rentable.
+   */
+  tiesPorNivel(
+    apuesta: 'PLAYER' | 'BANKER' | undefined,
+    filtros: Racha3Filtros,
+  ): Promise<readonly Racha3TiesNivel[]>;
 }

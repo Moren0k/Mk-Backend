@@ -12,9 +12,11 @@ import type {
   Racha3Filtros,
   Racha3Intervalo,
   Racha3IntervaloMetrica,
+  Racha3LadosJugadas,
   Racha3PorDia,
   Racha3PorHora,
   Racha3Resumen,
+  Racha3TiesNivel,
 } from '../../../core/analytics/types/racha3-analytics.type';
 import { PrismaService } from '../prisma.service';
 
@@ -311,6 +313,47 @@ export class PrismaRacha3AnalyticsReader implements Racha3AnalyticsReader {
       ejecucion_duracion_ms: aNumeroONulo(r.ejecucion_duracion_ms),
       ejecucion_en: aIsoONulo(r.ejecucion_en),
     };
+  }
+
+  async ladosJugadas(filtros: Racha3Filtros): Promise<Racha3LadosJugadas> {
+    // Solo la ventana temporal: la distribución de ganadores es una
+    // propiedad de `jugadas`, no de las oportunidades, así que los filtros
+    // de tipo/bloqueadas/integridad no aplican.
+    const [r] = await this.consultar(
+      'SELECT * FROM racha3_lados_jugadas($1::timestamptz,$2::timestamptz)',
+      filtros.desde ?? null,
+      filtros.hasta ?? null,
+    );
+
+    return {
+      total: aNumero(r.total),
+      banker: aNumero(r.banker),
+      player: aNumero(r.player),
+      tie: aNumero(r.tie),
+      no_tie: aNumero(r.no_tie),
+      corte_id: aNumeroONulo(r.corte_id),
+    };
+  }
+
+  async tiesPorNivel(
+    apuesta: 'PLAYER' | 'BANKER' | undefined,
+    filtros: Racha3Filtros,
+  ): Promise<readonly Racha3TiesNivel[]> {
+    const filas = await this.consultar(
+      'SELECT * FROM racha3_ties_por_nivel($1::text,$2::timestamptz,$3::timestamptz,$4::boolean,$5::boolean)',
+      apuesta ?? null,
+      filtros.desde ?? null,
+      filtros.hasta ?? null,
+      filtros.incluirBloqueadas,
+      filtros.incluirIntegridadDudosa,
+    );
+
+    return filas.map((r) => ({
+      nivel: aNumero(r.nivel),
+      ties: aNumero(r.ties),
+      operaciones: aNumero(r.operaciones),
+      alcanzaron: aNumero(r.alcanzaron),
+    }));
   }
 
   private mapResumen(r: Fila): Racha3Resumen {

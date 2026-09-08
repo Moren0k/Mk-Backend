@@ -5,18 +5,6 @@
  * aplicación nunca debe leer `process.env` directamente, solo `ConfigService`.
  */
 
-/**
- * Normaliza una variable opcional: `""` pasa a `undefined`.
- *
- * Importa donde hay una cadena de respaldo con `??`: una variable declarada
- * pero vacía en el `.env` (`RACHA3_TEST_TELEGRAM_BOT_TOKEN=`) llega como
- * `""`, que NO es nullish, así que el `??` se quedaría con la cadena vacía y
- * el respaldo nunca se aplicaría. Se usa solo donde ese respaldo existe;
- * el resto de la config se deja como está.
- */
-const opcional = (valor: string | undefined): string | undefined =>
-  valor === undefined || valor.trim().length === 0 ? undefined : valor;
-
 export default () => ({
   app: {
     port: parseInt(process.env.PORT ?? '3000', 10),
@@ -98,36 +86,6 @@ export default () => ({
     // unas pocas jugadas no cambia ninguna conclusión. Un tick sin jugadas
     // nuevas no toca la base.
     intervalMs: parseInt(process.env.ANALYTICS_INTERVAL_MS ?? '60000', 10),
-  },
-  racha3Test: {
-    // Estrategia EXPERIMENTAL "Racha 3 Test" (ver RACHA3-TEST.md). Arranca
-    // APAGADA a propósito: sin esto en "true" el coordinator no se suscribe
-    // a nada y su canal de Telegram no envía nada. No crea operaciones ni
-    // apuestas reales en ningún caso.
-    enabled: process.env.RACHA3_TEST_ENABLED === 'true',
-    // Umbral del score para TOMAR. Default 86.87 = límite inferior del
-    // IC95 de Wilson de la tasa de acierto del histórico GLOBAL al
-    // 2026-09-08 (3577/4069). Es decir: "solo tomar una oportunidad cuya
-    // tasa defendible sea al menos tan buena como el histórico completo".
-    // Es el umbral experimental INICIAL, no un valor universal: al crecer
-    // el histórico el límite se mueve y hay que revisarlo.
-    umbralScore: parseFloat(process.env.RACHA3_TEST_SCORE_THRESHOLD ?? '86.87'),
-    // Mínimo de oportunidades resueltas que debe respaldar la condición.
-    // Bajo esto se descarta sin importar el score: una muestra insuficiente
-    // no se compensa con puntos.
-    muestraMinima: parseInt(process.env.RACHA3_TEST_MIN_MUESTRA ?? '500', 10),
-    // Máximas jugadas sin procesar por Analytics antes de considerar que la
-    // evidencia no está al día. Con el scheduler cada 60 s y una cadencia
-    // de ~33 s por ronda, el rezago normal es de 1-2 jugadas; 50 tolera un
-    // par de ticks perdidos sin aceptar evidencia realmente vieja.
-    maxRezagoJugadas: parseInt(process.env.RACHA3_TEST_MAX_REZAGO ?? '50', 10),
-    telegram: {
-      // Bot/chat del canal DEBUG. Si no se definen, se reutilizan los de
-      // TELEGRAM_PRUEBAS_*: comparte el destino sin compartir el
-      // interruptor (ver Racha3TestModule).
-      botToken: opcional(process.env.RACHA3_TEST_TELEGRAM_BOT_TOKEN),
-      chatId: opcional(process.env.RACHA3_TEST_TELEGRAM_CHAT_ID),
-    },
   },
   report: {
     // Cada cuánto ReportCheckpointScheduler persiste won/lost/alertsSent

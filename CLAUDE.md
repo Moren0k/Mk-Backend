@@ -17,7 +17,7 @@ Documentación de referencia (leer antes de tocar la arquitectura):
 - [`documentacion_mk_api.md`](./documentacion_mk_api.md) — contrato completo de **nuestra** API propia (`src/api/`): cada endpoint, auth, request/response, códigos de error, formato SSE. Actualizar este documento junto con cualquier cambio en `src/api/`.
 - [`DATABASE.md`](./DATABASE.md) — base de datos (PostgreSQL/Supabase vía Prisma): cómo conectarse, esquema real de las 6 tablas (`jugadas`, `report_checkpoints` y las 4 derivadas de Analytics en §11), diagramas y decisiones de diseño.
 - [`ANALYTICS.md`](./ANALYTICS.md) — referencia única del dominio Analytics histórico "Racha 3": semántica exacta (columna, gap de 120000 ms, operación, TIE, MG1/MG2/LOSS, PENDIENTE), banderas `bloqueada_por_operacion_previa` e `integridad_ok`, rebuild/incremental/checkpoint, las 17 funciones SQL, invariantes V0–V11, verificación TS↔SQL, y limitaciones conocidas. **Leer antes de tocar cualquier cosa bajo `analytics/`.** Analytics no predice ni decide alertas: entrega evidencia histórica y el Core mantiene la decisión.
-- [`RACHA3-TEST.md`](./RACHA3-TEST.md) — estrategia **experimental** `racha-3-test`: duplicación controlada de `streak-3` que consulta la evidencia de Analytics, calcula un score (límite inferior del IC95 de Wilson) y filtra alertas. No apuesta, no está en `STRATEGIES`, no publica eventos y su canal Telegram DEBUG está fuera de `NOTIFICATION_CHANNELS`. Arranca apagada (`RACHA3_TEST_ENABLED`). Incluye la fórmula, los gates, el backtest walk-forward y la demostración de que `streak-3` quedó intacta.
+- [`3AL3.md`](./3AL3.md) — estrategia `3al3`: la misma Racha 3 que `streak-3`, pero filtrada por la evidencia histórica de Analytics. Solo alerta cuando la tasa defendible del lado apostado supera el **punto de equilibrio** de la escalera de martingala (score = límite inferior del IC95 de Wilson; umbral = `(pérdida + peaje de empates) / (pérdida + ganancia)`). Es una estrategia normal: sin variables de entorno, se enciende asignándola a un canal como las demás, y sus alertas salen por el pipeline de producción. Incluye la fórmula, los gates, el backtest walk-forward y las mediciones que descartan hora/día/distancia como factores.
 - [`Mk-Api.md`](./Mk-Api.md) — bitácora de decisiones/ADRs de diseño de `src/api/` (por qué se construyó así, alternativas descartadas). Referenciada por decenas de comentarios en `src/api/` y `src/application/` (`grep -r "Mk-Api.md" src/`) — no borrar sin antes limpiar esas referencias.
 - `INIT.md` — documento de arquitectura original/objetivo (fuente de verdad conceptual; `ARCHITECTURE.md` describe el estado real implementado).
 
@@ -39,6 +39,7 @@ pnpm test:e2e           # jest con test/jest-e2e.json
 
 pnpm analytics:rebuild  # reconstrucción histórica completa de Analytics (ver ANALYTICS.md §10.1)
 pnpm analytics:verify   # verificación cruzada TS ↔ SQL + invariantes V0-V11. Debe dar 0 diferencias
+pnpm 3al3:backtest      # backtest de la estrategia 3al3: retrospectivo vs walk-forward (ver 3AL3.md)
 ```
 
 `analytics:rebuild` y `analytics:verify` corren con `ts-node` contra la base real y necesitan `DATABASE_URL`/`DIRECT_URL`. `rebuild` es destructivo para las tablas **derivadas** (`TRUNCATE`), nunca para `jugadas`; después de cualquier rebuild hay que correr `verify`.
