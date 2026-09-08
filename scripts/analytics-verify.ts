@@ -102,6 +102,60 @@ async function verificarAgregaciones(
     "SELECT * FROM racha3_intervalos('PERDIDAS',NULL,NULL,NULL,true)",
   );
 
+  // El conjunto en riesgo POR DISTANCIA, reconstruido con la misma
+  // definición que usa `racha3_hazard_distancia`: cada intervalo de largo k
+  // está en riesgo en cada d de 1..k, más la cola abierta desde la última
+  // confirmación hasta el checkpoint.
+  //
+  // Se calcula por distancia y no por bucket a propósito. La versión
+  // anterior de esta comprobación exigía que `casos_observados` decreciera
+  // entre buckets, y eso NO es una invariante: los buckets tienen anchos
+  // distintos (5, 5, 5, 5, 10, 20 y el último abierto), así que la suma de
+  // un bucket ancho puede superar legítimamente la de uno estrecho. Se
+  // cumplía por casualidad de los datos y ocultaba el defecto real. Lo que
+  // la teoría del hazard sí obliga es que el conjunto en riesgo decrezca
+  // con la distancia, y eso solo se ve por distancia.
+  const riesgo = await todas<Record<string, unknown>>(`
+    WITH s AS (
+      SELECT jugadas AS k
+        FROM racha3_serie_distancias('RACHA3', NULL, NULL, NULL, false, true)
+    ),
+    corte AS (
+      SELECT COALESCE(
+        (SELECT ultima_jugada_id FROM analytics_checkpoints WHERE proceso = 'racha3'),
+        (SELECT max(id) FROM jugadas)) AS id
+    ),
+    cola AS (
+      SELECT COALESCE((SELECT count(*) FROM jugadas j
+                        WHERE j.id > (SELECT max(jugada_confirmacion_id) FROM racha3_operaciones)
+                          AND j.id <= (SELECT id FROM corte)), 0)::integer AS m
+    )
+    SELECT d::int AS d,
+           ((SELECT count(*) FROM s WHERE s.k >= d)
+            + (CASE WHEN (SELECT m FROM cola) >= d THEN 1 ELSE 0 END)) AS en_riesgo
+      FROM generate_series(1, GREATEST(
+             COALESCE((SELECT max(k) FROM s), 0), (SELECT m FROM cola), 1)) d
+     ORDER BY d`);
+
+  // Total de tiempo en riesgo observado, y de dónde puede salir: la suma de
+  // los largos de los intervalos más la cola acotada. Es una identidad
+  // exacta, y es la que delata si el hazard vuelve a contar jugadas que
+  // Analytics todavía no procesó.
+  const horizonte = await uno<Record<string, unknown>>(`
+    WITH corte AS (
+      SELECT COALESCE(
+        (SELECT ultima_jugada_id FROM analytics_checkpoints WHERE proceso = 'racha3'),
+        (SELECT max(id) FROM jugadas)) AS id
+    )
+    SELECT (SELECT COALESCE(sum(jugadas), 0)
+              FROM racha3_serie_distancias('RACHA3', NULL, NULL, NULL, false, true))
+             AS suma_intervalos,
+           COALESCE((SELECT count(*) FROM jugadas j
+                      WHERE j.id > (SELECT max(jugada_confirmacion_id) FROM racha3_operaciones)
+                        AND j.id <= (SELECT id FROM corte)), 0) AS cola_acotada,
+           COALESCE((SELECT count(*) FROM jugadas j
+                      WHERE j.id > (SELECT id FROM corte)), 0)  AS sin_procesar`);
+
   const suma = (filas: Record<string, unknown>[], campo: string) =>
     filas.reduce((acc, f) => acc + Number(f[campo] ?? 0), 0);
 
@@ -175,10 +229,24 @@ async function verificarAgregaciones(
     },
     {
       nombre: 'el conjunto en riesgo decrece con la distancia',
-      ok: hz.every(
-        (h, i) =>
-          i === 0 || n(h.casos_observados) <= n(hz[i - 1].casos_observados),
+      ok: riesgo.every(
+        (r, i) => i === 0 || n(r.en_riesgo) <= n(riesgo[i - 1].en_riesgo),
       ),
+      detalle: `d=1..${riesgo.length}, riesgo(1)=${n(riesgo[0]?.en_riesgo)} → riesgo(${riesgo.length})=${n(riesgo[riesgo.length - 1]?.en_riesgo)}`,
+    },
+    {
+      // Regresión del defecto corregido en
+      // `20260908050000_analytics_racha3_hazard_corte`: la cola en riesgo se
+      // contaba contra `jugadas` sin cota, así que cada jugada aún sin
+      // procesar inflaba el bucket más lejano. Esta identidad lo detecta
+      // aunque el rezago sea de una sola jugada.
+      nombre: 'el hazard no cuenta jugadas posteriores al checkpoint',
+      ok:
+        suma(hz, 'casos_observados') ===
+        n(horizonte.suma_intervalos) + n(horizonte.cola_acotada),
+      detalle:
+        `casos=${suma(hz, 'casos_observados')} = intervalos=${n(horizonte.suma_intervalos)}` +
+        ` + cola=${n(horizonte.cola_acotada)}; ${n(horizonte.sin_procesar)} jugadas sin procesar quedan fuera`,
     },
     {
       nombre: 'los intervalos entre pérdidas son (#LOSS - 1)',

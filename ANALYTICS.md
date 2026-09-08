@@ -1,6 +1,6 @@
 # ANALYTICS.md — Analytics histórico de la estrategia "Racha 3"
 
-> Estado al 2026-09-08. Implementado y aplicado sobre la base real (5 migraciones, `20260907234500` a `20260908040000`). Este documento es la referencia única del dominio: si algo cambia en `src/core/analytics/`, `src/application/analytics/`, `src/infrastructure/persistence/analytics/`, `src/api/resources/analytics/` o en las migraciones de Analytics, se actualiza acá.
+> Estado al 2026-09-08. Implementado y aplicado sobre la base real (6 migraciones, `20260907234500` a `20260908050000`). Este documento es la referencia única del dominio: si algo cambia en `src/core/analytics/`, `src/application/analytics/`, `src/infrastructure/persistence/analytics/`, `src/api/resources/analytics/` o en las migraciones de Analytics, se actualiza acá.
 
 ---
 
@@ -500,7 +500,17 @@ Consecuencia: **no existe un histórico de alertas reales de `streak-3` contra e
 
 Corolario positivo: `maxMartingalesOverrides` también arranca vacío, así que `max_martingalas = 2` es correcto para todo el histórico, y la columna existe como protección hacia adelante.
 
-### 11.5 Otras
+### 11.5 La cola del hazard bajo filtros temporales — abierto
+
+Corregido en `20260908050000_analytics_racha3_hazard_corte`: la cola en riesgo de `racha3_hazard_distancia()` se contaba contra `jugadas` **sin cota**, así que cada jugada que la ingesta insertó después del último incremental entraba como tiempo en riesgo ya observado. La cola aporta `+1` a cada distancia de `1..m` **y** estira el rango hasta `m`, así que con el scheduler detenido (`m = 1.371` sobre un `max(k)` real de 74) el bucket `51+` acumulaba 1.321 casos que ningún intervalo alcanzó nunca: `casos_observados = 1.395` contra 74 reales, y su tasa hundida a 0,0057. Ahora la cola se acota al checkpoint, con el mismo horizonte que usa `analytics_racha3_validar()`.
+
+**Lo que sigue abierto:** la cola se ancla a `max(jugada_confirmacion_id)` de toda la tabla, **sin aplicar** `p_tipo`, `p_desde`, `p_hasta` ni los filtros de bloqueadas/integridad que sí aplican a la serie. Con los valores por defecto es correcto. Al pasar una ventana temporal, la cola sigue siendo la del presente y no la del final de esa ventana, así que infla el bucket lejano. Arreglarlo **cambia la semántica del hazard bajo filtros** y por eso no se hizo en la migración correctiva: queda como decisión pendiente.
+
+Regresión cubierta en `analytics:verify` por dos comprobaciones: *el conjunto en riesgo decrece con la distancia* (por distancia, no por bucket) y *el hazard no cuenta jugadas posteriores al checkpoint* (identidad exacta `sum(casos_observados) = sum(intervalos) + cola_acotada`).
+
+> La comprobación anterior exigía que `casos_observados` decreciera **entre buckets**, y eso no es una invariante: los buckets tienen anchos distintos (5, 5, 5, 5, 10, 20 y el último abierto), así que la suma de un bucket ancho puede superar legítimamente la de uno estrecho. Se cumplía por casualidad de los datos y ocultó este defecto hasta que el rezago creció.
+
+### 11.6 Otras
 
 - **El orden por `id` es cronológico pero empíricamente**, no estructuralmente: depende de que `Mk-Ingestion-Service` sea el único escritor (verificado por grep: `Mk-Backend` no escribe en `jugadas`). Si alguna vez corren dos procesos contra la misma base, se rompe. La guardia de retroactividad del incremental lo detecta y exige rebuild.
 - **`bloqueada_por_operacion_previa` no modela el disparo retrasado** del motor (19 filas, 0,46 %). Ver §1.5.
