@@ -1,6 +1,6 @@
 # ANALYTICS.md — Analytics histórico de la estrategia "Racha 3"
 
-> Estado al 2026-09-08. Implementado y aplicado sobre la base real (6 migraciones, `20260907234500` a `20260908050000`). Este documento es la referencia única del dominio: si algo cambia en `src/core/analytics/`, `src/application/analytics/`, `src/infrastructure/persistence/analytics/`, `src/api/resources/analytics/` o en las migraciones de Analytics, se actualiza acá.
+> Estado al 2026-09-08. Implementado y aplicado sobre la base real (7 migraciones, `20260907234500` a `20260909010000`). Este documento es la referencia única del dominio: si algo cambia en `src/core/analytics/`, `src/application/analytics/`, `src/infrastructure/persistence/analytics/`, `src/api/resources/analytics/` o en las migraciones de Analytics, se actualiza acá.
 
 ---
 
@@ -294,7 +294,7 @@ Verificado en vivo contra la base real, con un fallo de conexión genuino (puert
 
 ## 6. Objetos SQL
 
-**1 vista + 17 funciones.** Todas de solo lectura excepto `reconstruir`, `rebuild` e `incremental`.
+**1 vista + 19 funciones.** Todas de solo lectura excepto `reconstruir`, `rebuild` e `incremental`.
 
 | Objeto | Qué hace |
 |---|---|
@@ -316,6 +316,8 @@ Verificado en vivo contra la base real, con un fallo de conexión genuino (puert
 | `racha3_columnas_distribucion(p_tipo, p_maximo)` | Longitudes de columna por tipo. Base del futuro "L" |
 | `racha3_distancia_actual(p_incluir_bloqueadas)` | Jugadas desde la última Racha 3, con su propio margen de error |
 | `racha3_estado()` | Salud del pipeline derivado |
+| `racha3_lados_jugadas(...)` | Distribución de ganadores en `jugadas` hasta el checkpoint. Base para estimar la ventaja del **lado que se apuesta** con ~9× más muestra que a nivel de oportunidad |
+| `racha3_ties_por_nivel(p_apuesta, ...)` | Empates ocurridos **dentro** de operaciones, por nivel de la escalera. Devuelve conteos: el coste depende de la escalera y del porcentaje de devolución, que son parámetros del Core (ver §11.6) |
 
 ### 6.1 Buckets configurables
 
@@ -510,7 +512,30 @@ Regresión cubierta en `analytics:verify` por dos comprobaciones: *el conjunto e
 
 > La comprobación anterior exigía que `casos_observados` decreciera **entre buckets**, y eso no es una invariante: los buckets tienen anchos distintos (5, 5, 5, 5, 10, 20 y el último abierto), así que la suma de un bucket ancho puede superar legítimamente la de uno estrecho. Se cumplía por casualidad de los datos y ocultó este defecto hasta que el rezago creció.
 
-### 11.6 Otras
+### 11.6 El empate NO es gratis, y `netUnits` lo ignora
+
+El dominio modela el empate como **neutral para el resultado**, y eso es correcto: no cuenta como victoria ni derrota, no consume gale y no cierra la operación. Pero **no es neutral para el dinero**: la mesa devuelve el 90 % de lo apostado, así que un empate cuesta el 10 % del importe del nivel donde cae, y el importe se duplica en cada nivel.
+
+Medido con `racha3_ties_por_nivel()` sobre el histórico (968 empates dentro de operaciones):
+
+| nivel | apuesta | empates | coste | por operación |
+|---|---|---|---|---|
+| 0 | 1 | 561 | 56,10 | 0,01330 |
+| 1 | 2 | 280 | 56,00 | 0,01328 |
+| 2 | 4 | 127 | 50,80 | 0,01204 |
+| **total** | | **968** | **162,90** | **0,03862** |
+
+Cada nivel cuesta casi lo mismo: la mitad de empates en el nivel siguiente, pero el doble de apuesta. Por eso el peaje **no se diluye** al añadir gales.
+
+Consecuencias:
+
+1. El **punto de equilibrio** de la progresión 1-2-4 no es 7/8 = 87,500 % sino **(7 + 0,0386)/8 = 87,983 %**. La tasa global observada es 87,980 %, tres milésimas por debajo.
+2. **Las unidades netas reales del histórico completo son −0,9, no las +162** que resultan de `won − lost × 7`. Los dos lados se cancelan: apostar BANKER deja +243,1 y apostar PLAYER −244,0.
+3. `GET /api/v1/reports/summary` **sobreestima `netUnits`** por la misma razón. Arreglarlo exige que `Operation` cuente los empates por nivel (hoy solo reporta `tieOccurred` por jugada, sin recordar dónde), propagarlo por `OperationSnapshot` y `OperationClosedRecord`, y añadir columna a `report_checkpoints`. **Queda como trabajo separado**, documentado en `reports-summary.vm.ts`.
+
+La aritmética de decisión vive en `core/racha3-test/equilibrio.ts`; Analytics solo entrega los conteos.
+
+### 11.7 Otras
 
 - **El orden por `id` es cronológico pero empíricamente**, no estructuralmente: depende de que `Mk-Ingestion-Service` sea el único escritor (verificado por grep: `Mk-Backend` no escribe en `jugadas`). Si alguna vez corren dos procesos contra la misma base, se rompe. La guardia de retroactividad del incremental lo detecta y exige rebuild.
 - **`bloqueada_por_operacion_previa` no modela el disparo retrasado** del motor (19 filas, 0,46 %). Ver §1.5.

@@ -201,3 +201,30 @@ export type Racha3Estado = {
   readonly ejecucion_duracion_ms: number | null;
   readonly ejecucion_en: string | null;
 };
+
+/**
+ * Distribución de ganadores sobre `jugadas` hasta el checkpoint, de
+ * `racha3_lados_jugadas()`. Base para estimar la ventaja del lado que se
+ * apuesta con ~9x más muestra que a nivel de oportunidad.
+ */
+export type Racha3LadosJugadas = {
+  readonly total: number;
+  readonly banker: number;
+  readonly player: number;
+  readonly tie: number;
+  readonly no_tie: number;
+  readonly corte_id: number | null;
+};
+
+/**
+ * Empates ocurridos DENTRO de operaciones, por nivel de la escalera, de
+ * `racha3_ties_por_nivel()`. Son conteos: cuánto cuesta un empate depende
+ * de la escalera y del porcentaje de devolución, que son parámetros del
+ * Core y no de SQL.
+ */
+export type Racha3TiesNivel = {
+  readonly nivel: number;
+  readonly ties: number;
+  readonly operaciones: number;
+  readonly alcanzaron: number;
+};

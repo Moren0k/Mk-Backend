@@ -189,6 +189,33 @@ Por eso:
   (bloquean) o como **advertencia** (informan). `penalizaciones` existe en el
   tipo y hoy siempre viene vacío.
 
+### Lo que resultó ser `tipo_racha`, en realidad
+
+> **Ampliado el 2026-09-09.** `tipo_racha` sí discrimina, pero no porque las
+> rachas de PLAYER sean especiales. Al medir el juego apareció el mecanismo:
+>
+> ```
+> BANKER  50,530 %      PLAYER  49,470 %      (38.963 jugadas no-empate)
+> z contra 50 % = 2,09  ·  homogéneo entre tercios (χ² = 0,28, crítico 5,99)
+> ```
+>
+> Tras una racha de PLAYER se apuesta BANKER — el lado que gana un poco más.
+> Tras una racha de BANKER se apuesta PLAYER — el que gana un poco menos. No
+> es la racha: es **qué lado te deja apostando**. Por eso la variable del
+> score es el **lado apostado**, no el tipo de racha (§5.2).
+>
+> Y el proceso **no tiene memoria**, medido de tres formas independientes:
+> `P(la columna sigue | llegó a k)` es plana en ~0,44 para k=1..6; los
+> intervalos entre pérdidas son geométricos (χ² = 3,70, crítico 9,49); y
+> «oportunidades desde la última pérdida» es plano (todos los |z| < 0,5).
+> Eso descarta de raíz cualquier score basado en «cada cuánto sale» o «no
+> estar en rango de una L»: es la falacia del jugador, y los datos la
+> rechazan.
+>
+> La medición completa —41 comparaciones con corrección de Bonferroni, de
+> las que no sobrevive ninguna— está en el comentario de
+> `racha3-test-score.calculator.ts`.
+
 ### Terminología
 
 Se respeta la de `ANALYTICS.md`. Tres nombres que se parecen y no son lo mismo:
@@ -208,63 +235,154 @@ próxima jugada.
 
 ## 5. Fórmula exacta
 
-```
-Entrada, de racha3_resumen(tipo_racha) — conteos CRUDOS, no tasas redondeadas:
-    aciertos   = directa + mg1 + mg2
-    resueltas  = muestra_n
+> **Rediseñada el 2026-09-09.** La versión original comparaba el límite
+> inferior del IC95 de un subgrupo contra el del histórico GLOBAL (86,87).
+> Eso es incoherente — el subgrupo es parte del grupo, así que se compara el
+> dato contra sí mismo — y con exactamente dos categorías degenera en
+> tautología: una está siempre por encima del promedio y la otra siempre por
+> debajo, **por aritmética, no por evidencia**. El filtro no filtraba: tomaba
+> siempre un lado y rechazaba siempre el otro. Y peor, un umbral así **nunca
+> puede decir «no tomes nada»**.
 
-1.  p̂ = aciertos / resueltas
+### 5.1 El umbral: punto de equilibrio
 
-2.  IC95 de Wilson, con z = 1,959963984540054:
-
-        denominador = 1 + z²/n
-        centro      = (p̂ + z²/(2n)) / denominador
-        margen      = (z / denominador) · √( p̂(1−p̂)/n + z²/(4n²) )
-
-        límite_inferior = máx(0, centro − margen)
-        límite_superior = mín(1, centro + margen)
-
-3.  score = redondear2( 100 × límite_inferior )
-
-4.  penalizaciones = ninguna (por diseño, ver §4)
-
-5.  tomar = (ningún gate disparado) Y (score >= umbral)
-```
-
-Wilson y no la aproximación normal porque las tasas están cerca de 0,88 y
-Wilson mantiene mejor cobertura en los extremos. **El umbral aprobado
-inicialmente (86,91) venía de la aproximación normal; el valor de Wilson sobre
-los mismos conteos es 86,87, y ese es el que quedó configurado.**
-
-El límite inferior es también la razón por la que **no hace falta un componente
-separado de «tamaño de muestra»**: con la misma tasa, una muestra chica produce
-un límite inferior más bajo, automáticamente y sin parámetros que ajustar.
+El umbral responde a una pregunta que **no tiene nada que ver con cuántas
+veces se ganó**: *¿qué tasa de acierto necesito para que esta apuesta no
+pierda dinero?* Depende sólo de la estructura de pago.
 
 ```
-intervaloWilson(9,   10)   → p̂ = 0,9000  límite inferior 0,595850 → score 59,58
-intervaloWilson(900, 1000) → p̂ = 0,9000  límite inferior 0,879848 → score 87,98
+gana  → +1 unidad, en cualquier nivel de la escalera
+falla → −(1+2+4) = −7 unidades
+TIE   → devuelve el 90 %, o sea CUESTA el 10 % de lo apostado en ese nivel.
+        No consume gale y no cierra la operación, pero cobra peaje.
+
+EV = p·ganancia − (1−p)·pérdida − peaje = 0
+⟹  umbral = (pérdida + peaje) / (pérdida + ganancia)
+umbral efectivo = max(RACHA3_TEST_UMBRAL_MINIMO, punto de equilibrio)
 ```
 
-### Verificación numérica
+El peaje se **mide**, con `racha3_ties_por_nivel()` sobre el lado que se va a
+apostar — una apuesta a PLAYER llega más veces a los niveles altos, y ahí un
+empate cuesta el doble o el cuádruple:
 
-Conteos reales del histórico al 2026-09-08, reproducibles con
-`GET /api/v1/analytics/racha3/resumen`:
-
-| Condición | aciertos / resueltas | p̂ | IC95 Wilson | score |
+| nivel | apuesta | empates | coste | por operación |
 |---|---|---|---|---|
-| GLOBAL | 3577 / 4069 | 0,87908577 | [0,86867, 0,88872] | **86,87** |
-| `tipo_racha=PLAYER` | 1802 / 2019 | 0,89252105 | [0,87826, 0,90529] | **87,83** |
-| `tipo_racha=BANKER` | 1775 / 2050 | 0,86585366 | [0,85041, 0,87992] | **85,04** |
+| 0 | 1 | 269 | 26,90 | 0,01284 |
+| 1 | 2 | 126 | 25,20 | 0,01203 |
+| 2 | 4 | 57 | 22,80 | 0,01088 |
+| **total** | | **452** | **74,90** | **0,03573** |
 
-Estos tres valores están fijados en `wilson.spec.ts`: si el test falla, el
-umbral configurado dejó de corresponder a su origen.
+```
+sin contar empates : 7/8              = 87,500 %
+contando empates   : (7 + 0,03573)/8  = 87,947 %  →  umbral 87,95
+```
 
-Consecuencia directa y que conviene decir en voz alta: con el umbral en 86,87,
-la regla **se reduce hoy a «tomar solo las rachas PLAYER»**, porque PLAYER está
-sobre el umbral y BANKER debajo. No es un efecto colateral escondido — es lo
-que la única evidencia discriminante disponible permite afirmar.
+**Dinámico, pero por el lado del coste.** El umbral se recalcula con los
+datos — pero con los de **coste** (cuántos empates hubo y en qué nivel),
+nunca con los de acierto. Es la distinción que hace que la comparación
+signifique algo:
 
----
+| | sale de | cambia cuando |
+|---|---|---|
+| **score** | el historial de aciertos | llega cada dato nuevo |
+| **umbral** | la estructura de pago | cambia la escalera, el pago o la frecuencia de empates |
+
+Si el umbral saliera de los aciertos, volveríamos a comparar los datos contra
+sí mismos. Y como se deriva de la configuración, pasar a
+`max_martingalas = 3` lo mueve solo a 93,75 %.
+
+### 5.2 El score: dos estimaciones, y se exigen las dos
+
+**DIRECTA** — límite inferior del IC95 de Wilson sobre las oportunidades ya
+resueltas de este lado. No supone nada del proceso; muestra ~2.100 por lado.
+
+```
+p̂ = aciertos/resueltas = 1874/2096 = 0,89408397
+IC95 Wilson (z = 1,959963984540054) = [0,88018147 , 0,90654535]
+score directo = 100 × 0,88018147 = 88,02
+```
+
+**MODELO** — se estima ω, la ventaja del lado apostado, sobre `jugadas`
+(~39.000 rondas no-empate, **9× más muestra**) y se propaga por la escalera.
+Como `1 − (1−ω)^intentos` es monótona creciente en ω, transformar los
+extremos del IC de ω da el IC de la tasa **sin aproximaciones** — nada de
+método delta:
+
+```
+ω = 19746/39067 = 0,50543937   IC95 = [0,50048129 , 0,51039614]
+tasa = 1 − (1−ω)³   → esperada 87,904 %, límite inferior 87,536 %
+score modelo = 87,54
+```
+
+**El score que decide es el MENOR de los dos**, que es exactamente lo mismo
+que exigir que ambos superen el umbral, y deja un único número comparable.
+
+Por qué no uno solo: la directa no supone nada, pero con ~2.100 casos su
+intervalo es ancho y llega a estar **2,2 errores estándar por encima** de lo
+que predice el modelo — puede venir con suerte. La del modelo es mucho más
+precisa, pero apoyada en independencia de rondas. Exigir las dos evita
+confiar en la suerte de una y en el supuesto de la otra.
+
+### 5.3 El resultado con los datos de hoy
+
+```
+score  = min(directa 88,02 , modelo 87,54) = 87,54
+umbral = 87,95
+87,54 < 87,95  →  NO TOMAR   ·   EV estimado −0,0325 unidades/operación
+```
+
+Apostar PLAYER (tras una racha BANKER) es mucho peor: score 85,04,
+EV −0,238.
+
+**Ninguna apuesta pasa hoy, y eso es el sistema funcionando.** El umbral
+anterior no podía producir este resultado ni en principio.
+
+### 5.4 Por qué la martingala no arregla nada
+
+```
+EV por operación = ventaja_por_unidad × importe_esperado_total
+```
+
+La ventaja por unidad no depende de la escalera; la escalera sólo cambia
+cuánto se apuesta. Medido:
+
+```
+apostar BANKER:  0,44706 − 0,43764 − 0,11530×0,10 = −0,00212  (−0,212 %)
+apostar PLAYER:  0,43764 − 0,44706 − 0,11530×0,10 = −0,02094  (−2,094 %)
+```
+
+La ventaja del lado BANKER es **+0,94 %** del importe; el peaje del empate,
+**−1,15 %**. El peaje es más grande. Y con una ventaja por unidad negativa,
+apostar más pierde más:
+
+| gales | intentos | tasa esperada | equilibrio | EV/op | apostado medio |
+|---|---|---|---|---|---|
+| 0 | 1 | 50,532 % | 50,652 % | −0,00239 | 1,130 |
+| 1 | 2 | 75,529 % | 75,648 % | −0,00476 | 2,249 |
+| **2** | **3** | **87,895 %** | **87,984 %** | **−0,00711** | **3,355** |
+| 3 | 4 | 94,012 % | 94,071 % | −0,00943 | 4,450 |
+| 4 | 5 | 97,038 % | 97,074 % | −0,01172 | 5,533 |
+
+Comprueba: `3,355 × (−0,00212) = −0,00711`. Exacto.
+
+Y la propiedad que resume el proyecto entero: **sobre un juego simétrico
+(ω = 0,5) y sin peaje, una martingala tiene expectativa EXACTAMENTE cero,
+para cualquier profundidad** — porque `1 − (1−½)^n = (2^n−1)/2^n`, que es
+justo el equilibrio. La detección de la racha **no aporta nada a la
+expectativa**: sólo decide cuándo se juega. Está fijado en
+`equilibrio.spec.ts`.
+
+### 5.5 El único parámetro que voltea el signo
+
+| devolución en empate | umbral | EV/op apostando BANKER |
+|---|---|---|
+| 100 % (push completo) | 87,500 % | **+0,03 → rentable** |
+| 95 % | 87,724 % | +0,01 → marginal |
+| **90 % (configurado)** | **87,947 %** | **−0,03 → pierde** |
+
+Un 10 % de diferencia en ese único número decide si la estrategia gana o
+pierde. Está en `RACHA3_TEST_DEVOLUCION_TIE`, y hay un test que demuestra
+que la MISMA evidencia pasa de NO TOMAR a TOMAR al ponerlo en 1 (§9.1b).
 
 ## 6. Gates
 
@@ -277,7 +395,8 @@ evalúan todos y se reportan todos), pero la decisión es un `AND`.
 | `ANALYTICS_REZAGADO` | `jugadas_sin_procesar > maxRezagoJugadas` | La evidencia existe pero no está al día. No hay forma defendible de decir «cuánto» resta un rezago de 200 jugadas. |
 | `MUESTRA_INSUFICIENTE` | `muestra_n < muestraMinima` | Una muestra insuficiente **no se compensa con puntos**. El IC ya la castiga; el gate impone además un mínimo duro. |
 | `OPERACION_VIRTUAL_ABIERTA` | Ya hay una simulación abierta | Réplica del criterio de `ActiveOperationRegistry`: nunca dos operaciones a la vez. |
-| `SCORE_BAJO_UMBRAL` | `score < umbralScore` | Es la regla del experimento. |
+| `MODELO_SIN_EVIDENCIA` | faltan los conteos de `jugadas` | Sin la segunda estimación no se puede exigir que las dos pasen. Falla cerrado. |
+| `SCORE_BAJO_UMBRAL` | el MENOR de las dos estimaciones < umbral | La apuesta no tiene expectativa positiva ni siendo pesimista con la incertidumbre. |
 
 `nivel` distingue el empate exacto: `score == umbral` es `EN_UMBRAL` y **se
 toma** (la regla es `>=`). `SIN_EVIDENCIA` cuando `score` es `null`.
@@ -292,7 +411,10 @@ Todas en `.env` (plantilla en [`.env.example`](./.env.example)), leídas en
 | Variable | Default | Qué controla |
 |---|---|---|
 | `RACHA3_TEST_ENABLED` | `false` | Interruptor maestro. Sin `true` el coordinator **no se suscribe a nada** y el canal DEBUG no envía nada. |
-| `RACHA3_TEST_SCORE_THRESHOLD` | `86.87` | Umbral del score para TOMAR. |
+| `RACHA3_TEST_UMBRAL_MINIMO` | `0` | Piso adicional. El umbral efectivo es el **mayor** entre éste y el punto de equilibrio, así que sólo puede hacer el sistema más exigente. 0 = manda el equilibrio. |
+| `RACHA3_TEST_ESCALERA` | `1,2,4` | Importe por nivel. Su suma es la pérdida por fallo, su longitud el número de intentos. |
+| `RACHA3_TEST_DEVOLUCION_TIE` | `0.9` | Fracción que devuelve un empate. **El parámetro que voltea el signo de la estrategia** (§5.5). |
+| `RACHA3_TEST_PAGO_ACIERTO` | `1` | Ganancia neta de un acierto. 1 = pago 1:1. |
 | `RACHA3_TEST_MIN_MUESTRA` | `500` | Mínimo de oportunidades resueltas que debe respaldar la condición. |
 | `RACHA3_TEST_MAX_REZAGO` | `50` | Máximas jugadas sin procesar por Analytics antes de descartar. |
 | `RACHA3_TEST_TELEGRAM_BOT_TOKEN` | *(vacío)* | Bot del canal DEBUG. Vacío ⇒ cae a `TELEGRAM_PRUEBAS_BOT_TOKEN`. |
@@ -304,12 +426,7 @@ compartir **interruptor**. `configuration.ts` normaliza `""` a `undefined`
 llega como cadena vacía y el `??` del módulo nunca habría aplicado el respaldo.
 Está cubierto en `configuration.racha3-test.spec.ts`.
 
-**Sobre el umbral 86,87.** Es el límite inferior del IC95 del histórico
-**GLOBAL**. El criterio: *«solo tomar una oportunidad cuya tasa defendible sea
-al menos tan buena como el histórico completo»*. Es un umbral **experimental
-inicial, no un valor universal**: al crecer el histórico el límite se mueve y
-hay que revisarlo. Y se derivó del mismo histórico sobre el que después se
-mide (§14).
+**Sobre el umbral.** Ya no se escribe a mano: se calcula (§5.1). El valor anterior, 86,87, era el límite inferior del IC95 del histórico GLOBAL, y comparar un subgrupo contra el grupo que lo contiene no es un test de nada. Sustituido por el punto de equilibrio, que sí tiene significado económico y sí puede rechazar todo.
 
 ---
 
@@ -346,26 +463,44 @@ leyendo la notificación por encima.
 `TelegramChannel` escapa a MarkdownV2 por su cuenta, así que el formatter
 escribe texto plano.
 
-### 9.1 TOMAR
+### 9.1 El caso real de hoy: NO TOMAR
+
+La mejor apuesta posible (racha PLAYER → apostar BANKER) con los datos de
+hoy. La cabecera trae el score que decide y las dos estimaciones, y el
+bloque de ECONOMÍA permite auditar el umbral contra la estructura de pago.
 
 ```
-🧪 RACHA 3 TEST — TOMAR
+🧪 RACHA 3 TEST — NO TOMAR
 EXPERIMENTAL — no operar. Esta estrategia no crea apuestas reales.
 
 Señal: racha PLAYER de 3 → apostar BANKER
-Estado: TOMAR
-Score: 87.83 / 100 · umbral 86.87 · nivel SOBRE_UMBRAL
+Estado: NO TOMAR
+Score: 87.54 / 100 · umbral 87.95 · nivel BAJO_UMBRAL
+  = min(directa 88.02, modelo 87.54) — se exigen las dos
+
+ECONOMÍA DE LA APUESTA (de aquí sale el umbral, no del historial)
+• gana +1 · falla −7 · empate devuelve 90 %, o sea cuesta el 10 % de lo apostado
+• peaje de empates: 0.03573 unidades por operación
+• equilibrio sin empates 87.500 % → con empates 87.95 (es el umbral)
+• EV estimado: -0.03253 unidades por operación (NEGATIVO: la apuesta pierde dinero)
+• ventaja por unidad apostada: -0.192 % — ninguna escalera de martingala la cambia
 
 EVIDENCIA (alimenta el score)
 • Condición: tipo_racha=PLAYER
-• Muestra (muestra_n): 2019 oportunidades resueltas
-• Aciertos: 1802 (directa 1048 + mg1 483 + mg2 271) · pérdidas 217
-• tasa_acierto_condicionada: 0.892521
-• IC95 Wilson: [0.878258, 0.905293]
-• limite_inferior_ic95: 0.878258 → score 87.83
+• Muestra (muestra_n): 2096 oportunidades resueltas
+• Aciertos: 1874 (directa 1090 + mg1 502 + mg2 282) · pérdidas 222
+• tasa_acierto_condicionada: 0.894084
+• IC95 Wilson: [0.880181, 0.906545]
+• limite_inferior_ic95: 0.880181 → score 87.54
 • advertencia_muestra: no
-• Ventana de la evidencia: 2026-06-10 15:00 a 2026-09-08 01:20
-• Excluidas de la evidencia: 25 bloqueadas · 5 con integridad dudosa incluidas
+• Ventana de la evidencia: 2026-08-21 18:23 a 2026-09-09 17:01
+• Excluidas de la evidencia: 22 bloqueadas · 6 con integridad dudosa incluidas
+
+ESTIMACION POR MODELO (jugadas, ~9x mas muestra)
+• lado apostado BANKER: gana 19746 · pierde 19321 · empata 5099
+• ventaja del lado (sin contar empates): 0.505439 · IC95 [0.500481, 0.510396]
+• tasa de la escalera = 1 − (1−ω)^3: esperada 87.904 %, limite inferior 87.536 %
+• supone rondas independientes (medido: P(sigue|k) plana en 0,44)
 
 CONTEXTO (observado, peso 0 — no alimenta el score)
 • distancia_actual: 7 jugadas (exacta: sí)
@@ -378,111 +513,114 @@ CONTEXTO (observado, peso 0 — no alimenta el score)
   (medidos sobre el histórico: hora, día y distancia no discriminan el resultado)
 
 COMPONENTES DEL SCORE
-• histórico: 1802/2019 → IC95 inferior 0.878258
-• muestra: 2019 / mínimo 500 → suficiente
+• histórico: 1874/2096 → IC95 inferior 0.880181
+• muestra: 2096 / mínimo 500 → suficiente
 • contexto: peso 0 por diseño
 • penalizaciones: ninguna (todo lo que degrada la decisión es un gate)
 
 ESTADO DE ANALYTICS
 • disponible: sí
 • rezago: 1 jugadas sin procesar
-• oportunidades en el histórico: 4119
+• oportunidades en el histórico: 2096
 
 GATES
 ✓ ANALYTICS_SIN_EVIDENCIA: Analytics devolvió evidencia utilizable.
+✓ MODELO_SIN_EVIDENCIA: 39067 rondas no-empate disponibles.
 ✓ ANALYTICS_REZAGADO: jugadas sin procesar = 1, máximo permitido = 50
-✓ MUESTRA_INSUFICIENTE: muestra_n = 2019, mínimo requerido = 500
+✓ MUESTRA_INSUFICIENTE: muestra_n = 2096, mínimo requerido = 500
 ✓ OPERACION_VIRTUAL_ABIERTA: Sin operación virtual en curso.
-✓ SCORE_BAJO_UMBRAL: score = 87.83, umbral = 86.87
+✗ SCORE_BAJO_UMBRAL: score = 87.54 (directa 88.02, modelo 87.54), umbral = 87.95
 
 RAZONES
-• Muestra suficiente: 2019 oportunidades resueltas (mínimo 500).
-• Tasa defendible 87.83 ≥ umbral 86.87: la evidencia respalda la oportunidad.
+• Muestra suficiente: 2096 oportunidades resueltas (mínimo 500).
+• La estimación por modelo alcanza el equilibrio 87.95 (directa 88.02, modelo 87.54): la apuesta pierde 0.0325 unidades por operación.
+• La ventaja por unidad apostada del lado BANKER es -0.192%: negativa, y ninguna escalera de martingala la corrige.
 
 ADVERTENCIAS
-• La evidencia incluye 5 oportunidad(es) con integridad dudosa sobre 2019.
+• La evidencia incluye 6 oportunidad(es) con integridad dudosa sobre 2096.
 
 TRAZA (verificable a mano)
-1. Analytics (condición "tipo_racha=PLAYER"): aciertos=1802 de resueltas=2019 (directa=1048 + mg1=483 + mg2=271), perdidas=217
-2. Tasa observada: p = 1802/2019 = 0.89252105
-3. IC95 Wilson (z=1.959964): centro=0.89177564 margen=0.01351759 → [0.87825804, 0.90529323]
-4. score = 100 × límite_inferior = 100 × 0.87825804 = 87.83
-5. Penalizaciones: ninguna (por diseño; ver el comentario de la calculadora)
-6. Gates: ANALYTICS_SIN_EVIDENCIA=ok · ANALYTICS_REZAGADO=ok · MUESTRA_INSUFICIENTE=ok · OPERACION_VIRTUAL_ABIERTA=ok · SCORE_BAJO_UMBRAL=ok
-7. Decisión: TOMAR
+1. Umbral (estructura de pago, no del historial de aciertos):
+   escalera = [1, 2, 4] → pérdida por fallo = 7, ganancia por acierto = 1
+   equilibrio sin contar empates = 7/8 = 87.500%
+     nivel 0: 269 empates × 1 × (1 − 0.9) = 26.90 unidades
+     nivel 1: 126 empates × 2 × (1 − 0.9) = 25.20 unidades
+     nivel 2: 57 empates × 4 × (1 − 0.9) = 22.80 unidades
+   peaje de empates = 74.90 / 2096 operaciones = 0.03573 unidades por operación
+   umbral = (7 + 0.03573) / 8 = 87.947%
+   umbral efectivo = max(mínimo 0, equilibrio 87.947) = 87.95
+2. DIRECTA — Analytics (condición "tipo_racha=PLAYER"): aciertos=1874 de resueltas=2096 (directa=1090 + mg1=502 + mg2=282), perdidas=222
+   p = 1874/2096 = 0.89408397
+   IC95 Wilson (z=1.959964) = [0.88018121, 0.90654485] → score directo = 88.02
+3. MODELO — ventaja del lado BANKER sobre jugadas (corte 44745): gana=19746 pierde=19321 empata=5099
+   ω = 19746/39067 = 0.50543937 · IC95 = [0.50048130, 0.51039638]
+   tasa = 1 − (1−ω)^3 → esperada 87.904%, límite inferior 87.536% → score modelo = 87.54
+   ventaja por unidad apostada = -0.00192 (-0.192%) — ninguna escalera la cambia
+4. score = min(directa 88.02, modelo 87.54) = 87.54 (exigir las dos ≡ exigirlo del mínimo)
+5. EV estimado = 0.875400×1 − 0.124600×7 − 0.03573 = -0.03253 unidades/operación
+6. Gates: ANALYTICS_SIN_EVIDENCIA=ok · MODELO_SIN_EVIDENCIA=ok · ANALYTICS_REZAGADO=ok · MUESTRA_INSUFICIENTE=ok · OPERACION_VIRTUAL_ABIERTA=ok · SCORE_BAJO_UMBRAL=BLOQUEA
+7. Decisión: NO TOMAR
 
-Resultado: TOMAR (se abre una operación VIRTUAL; no se apuesta nada)
+Resultado: NO TOMAR (descartada por SCORE_BAJO_UMBRAL)
 
 evaluacionId: 3f5a1c2e-7b48-4d09-9a61-8c2d4e6f0a15
 triggerGameUuid: a1c9f4e2-5d3b-4c88-9f10-6e2b7a4d0c31
-evaluada: 2026-09-08T15:41:03.204Z
+evaluada: 2026-09-09T15:41:03.204Z
 ```
 
-La sección TRAZA es el requisito 13 del diseño: permite recorrer a mano
-`datos Analytics → tasa → IC95 → límite inferior → penalizaciones → score →
-gates → decisión` sin creerle nada al programa.
+La sección TRAZA permite recorrer a mano `estructura de pago → umbral →
+conteos → tasa → IC95 → dos estimaciones → score → EV → gates → decisión`
+sin creerle nada al programa.
 
-### 9.2 NO TOMAR — cada gate dice exactamente qué lo descartó
+### 9.1b La misma evidencia con devolución del 100 %: TOMAR
 
-Las secciones son las mismas; cambia el cierre y el gate marcado con `✗`.
+El único parámetro que voltea el signo. Con `RACHA3_TEST_DEVOLUCION_TIE=1`,
+y exactamente los mismos datos, el peaje desaparece, el umbral baja a 87,50
+y la apuesta pasa a tener expectativa positiva:
 
-**Score bajo umbral** (racha BANKER):
+```
+🧪 RACHA 3 TEST — TOMAR
+Estado: TOMAR
+Score: 87.54 / 100 · umbral 87.5 · nivel SOBRE_UMBRAL
+  = min(directa 88.02, modelo 87.54) — se exigen las dos
+
+ECONOMÍA DE LA APUESTA (de aquí sale el umbral, no del historial)
+• gana +1 · falla −7 · empate devuelve 100 %, o sea cuesta el 0 % de lo apostado
+• peaje de empates: 0.00000 unidades por operación
+• equilibrio sin empates 87.500 % → con empates 87.5 (es el umbral)
+• EV estimado: 0.00320 unidades por operación (positivo)
+• ventaja por unidad apostada: 0.962 % — ninguna escalera de martingala la cambia
+
+```
+
+### 9.2 NO TOMAR — cada gate dice qué lo descartó
+
+**Analytics caído** — sin evidencia no hay score, y un fallo nunca produce
+un score favorable:
 
 ```
 🧪 RACHA 3 TEST — NO TOMAR
-Score: 85.04 / 100 · umbral 86.87 · nivel BAJO_UMBRAL
-...
-✗ SCORE_BAJO_UMBRAL: score = 85.04, umbral = 86.87
-RAZONES
-• Tasa defendible 85.04 < umbral 86.87: la evidencia no alcanza para respaldarla.
-Resultado: NO TOMAR (descartada por SCORE_BAJO_UMBRAL)
+Estado: NO TOMAR
+Score: sin evidencia (umbral 87.5)
+
+ECONOMÍA DE LA APUESTA (de aquí sale el umbral, no del historial)
+• gana +1 · falla −7 · empate devuelve 90 %, o sea cuesta el 10 % de lo apostado
+• peaje de empates: 0.00000 unidades por operación
+• equilibrio sin empates 87.500 % → con empates 87.5 (es el umbral)
+• EV estimado: n/d (sin evidencia)
 ```
 
-**Analytics caído**:
+**Analytics rezagado** — el caso que muestra que un gate no es un score
+bajo: score por encima del umbral y aun así NO TOMAR.
 
 ```
 🧪 RACHA 3 TEST — NO TOMAR
-Score: sin evidencia (umbral 86.87)
+Estado: NO TOMAR
+Score: 87.54 / 100 · umbral 87.5 · nivel SOBRE_UMBRAL
+  = min(directa 88.02, modelo 87.54) — se exigen las dos
 
-EVIDENCIA (alimenta el score)
-• No se pudo obtener evidencia de Analytics.
-...
-ESTADO DE ANALYTICS
-• disponible: NO
-• error: Can't reach database server at `[REGION].pooler.supabase.com:6543`
-
-GATES
-✗ ANALYTICS_SIN_EVIDENCIA: Can't reach database server at `...:6543`
-
-TRAZA (verificable a mano)
-1. Analytics: sin evidencia utilizable → score = null
-2. Decisión: NO TOMAR (un fallo de evidencia nunca produce score favorable)
-
-Resultado: NO TOMAR (descartada por ANALYTICS_SIN_EVIDENCIA)
-```
-
-**Muestra insuficiente** (120 resueltas): dispara `MUESTRA_INSUFICIENTE` **y**
-`SCORE_BAJO_UMBRAL`, porque el IC ancho de una muestra chica ya baja el score
-por su cuenta (81,37 con p̂ = 0,883):
-
-```
-✗ MUESTRA_INSUFICIENTE: muestra_n = 120, mínimo requerido = 500
-✗ SCORE_BAJO_UMBRAL: score = 81.37, umbral = 86.87
-ADVERTENCIAS
-• Analytics advierte sobre el tamaño de muestra: muestra_n < 500.
-Resultado: NO TOMAR (descartada por MUESTRA_INSUFICIENTE, SCORE_BAJO_UMBRAL)
-```
-
-**Analytics rezagado** — el caso que muestra que un gate no es un score bajo:
-score 87,83 **sobre** el umbral y aun así NO TOMAR.
-
-```
-Score: 87.83 / 100 · umbral 86.87 · nivel SOBRE_UMBRAL
-✗ ANALYTICS_REZAGADO: jugadas sin procesar = 371, máximo permitido = 50
-✓ SCORE_BAJO_UMBRAL: score = 87.83, umbral = 86.87
-RAZONES
-• Analytics rezagado en 371 jugadas: la evidencia no está al día.
-Resultado: NO TOMAR (descartada por ANALYTICS_REZAGADO)
+ECONOMÍA DE LA APUESTA (de aquí sale el umbral, no del historial)
+• gana +1 · falla −7 · empate devuelve 100 %, o sea cuesta el 0 % de lo apostado
 ```
 
 ### 9.3 Simulación resuelta
@@ -493,7 +631,7 @@ EXPERIMENTAL — operación VIRTUAL, no fue una apuesta real.
 
 Evaluación: 3f5a1c2e-7b48-4d09-9a61-8c2d4e6f0a15
 Racha: PLAYER → apuesta BANKER
-Score con el que se tomó: 87.83
+Score con el que se tomó: 87.54
 
 Resultado simulado: MG1
 Jugadas evaluadas: 2 (empates neutrales: 0)
@@ -512,7 +650,7 @@ Contexto de logger `Racha3Test`. Todas las líneas llevan
 | Evento | Nivel | Cuándo | Campos |
 |---|---|---|---|
 | `racha3_test_signal` | log | se confirmó una oportunidad | `triggerGameUuid`, `tipoRacha`, `apuesta`, `horaColombia` |
-| `racha3_test_score` | log | score calculado | `score`, `umbral`, `nivel`, `muestraN`, `tasaObservada`, `icInferior`, `rezago` |
+| `racha3_test_score` | log | score calculado | `score`, `umbral`, `nivel`, `directo`, `modelo`, `ev`, `peajeTie`, `muestraN`, `tasaObservada`, `icInferior`, `rezago` |
 | `racha3_test_decision` | log | decisión tomada | `decision`, `gatesDisparados=[...]` |
 | `racha3_test_debug` | debug | antes de enviar el mensaje | — |
 | `racha3_test_simulacion_resuelta` | log | cerró una operación virtual | `resultado`, `jugadas`, `ties`, `score` |
@@ -522,9 +660,9 @@ Ejemplo real (de `racha3-test.coordinator.spec.ts`):
 
 ```
 racha3_test_signal evaluacionId=1cb7880f-… triggerGameUuid=game-3 tipoRacha=PLAYER apuesta=BANKER horaColombia=10
-racha3_test_score  evaluacionId=1cb7880f-… score=87.83 umbral=86.87 nivel=SOBRE_UMBRAL muestraN=2019 tasaObservada=0.892521 icInferior=0.878258 rezago=1
+racha3_test_score  evaluacionId=1cb7880f-… score=87.54 umbral=87.95 nivel=BAJO_UMBRAL directo=88.02 modelo=87.54 ev=-0.03253 peajeTie=0.03573 muestraN=2096 tasaObservada=0.894084 icInferior=0.880181 rezago=1
 racha3_test_decision evaluacionId=1cb7880f-… decision=TOMAR gatesDisparados=[]
-racha3_test_simulacion_resuelta evaluacionId=1cb7880f-… resultado=DIRECTA jugadas=1 ties=0 score=87.83
+racha3_test_simulacion_resuelta evaluacionId=1cb7880f-… resultado=DIRECTA jugadas=1 ties=0 score=87.54
 ```
 
 **No se escribe una línea por jugada.** Sin oportunidad confirmada no hay log
@@ -556,62 +694,70 @@ jugadas (más TIE) en resolverse, así que al confirmar hay operaciones abiertas
 cuyo resultado todavía no es evidencia; contarlas sería una fuga sutil y difícil
 de ver después.
 
-### Resultados (histórico al 2026-09-08, 4.069 oportunidades resueltas y no bloqueadas, 10 con integridad dudosa incluidas)
+### Resultados (histórico al 2026-09-09, 4.225 oportunidades resueltas y no bloqueadas)
 
-Ventana: `2026-08-21T18:23:15Z` … `2026-09-08T01:20:16Z`.
+Umbral calculado: **87,982 %** (peaje de empates 0,03859 u/op; sin empates
+serían 87,500 %).
 
 |  | Retrospectivo (con fuga) | **Walk-forward (sin fuga)** |
 |---|---|---|
-| Oportunidades evaluadas | 4.069 | 4.069 |
-| TOMAR | 2.019 (49,62 %) | **600 (14,75 %)** |
-| NO TOMAR | 2.050 (50,38 %) | **3.469 (85,25 %)** |
-| · por muestra insuficiente | 0 | **1.000** |
-| · por score bajo umbral | 2.050 | 2.469 |
+| Oportunidades evaluadas | 4.224 | 4.225 |
+| TOMAR | 2.096 (49,62 %) | **32 (0,76 %)** |
+| NO TOMAR | 2.128 (50,38 %) | **4.193 (99,24 %)** |
+| · por muestra insuficiente | 0 | 1.000 |
+| · por score bajo umbral | 2.128 | 3.193 |
 | Errores de Analytics | 0 (no aplica offline) | 0 (no aplica offline) |
-| Score promedio | 86,42 | **84,65** |
+| Score promedio | 86,52 | **84,71** |
 
 Distribución del score, walk-forward:
 
 | Bucket | n | % |
 |---|---|---|
-| < 80 | 96 | 2,36 % |
-| 80 – 84 | 1.093 | 26,86 % |
-| 84 – 86 | 1.385 | 34,04 % |
-| 86 – 86,87 | 890 | 21,87 % |
-| **86,87 – 88 (TOMAR)** | **603** | **14,82 %** |
-| 88 – 90 | 0 | 0 % |
+| < 80 | 96 | 2,27 % |
+| 80 – 84 | 1.093 | 25,87 % |
+| 84 – 86 | 1.464 | 34,65 % |
+| 86 – 87,98 | 1.538 | 36,40 % |
+| **87,98 – 88 (TOMAR)** | **3** | **0,07 %** |
+| 88 – 90 | 29 | 0,69 % |
 | ≥ 90 | 0 | 0 % |
 | sin score (evidencia vacía) | 2 | — |
-
-> Los 603 del bucket y los 600 TOMAR difieren en 3: son evaluaciones cuyo score
-> cae en `[86,87 – 88)` pero que un gate distinto descartó.
 
 Resultado histórico, walk-forward:
 
 | Grupo | n | acierto | IC95 | directa | mg1 | mg2 | loss |
 |---|---|---|---|---|---|---|---|
-| **TOMAR** | 600 | **90,50 %** | [87,89 – 92,60] | 54,17 % | 22,17 % | 14,17 % | **9,50 %** |
-| NO TOMAR | 3.469 | 87,46 % | [86,32 – 88,52] | 49,41 % | 25,40 % | 12,65 % | 12,54 % |
-| todas | 4.069 | 87,91 % | [86,87 – 88,87] | 50,11 % | 24,92 % | 12,88 % | 12,09 % |
+| **TOMAR** | 32 | 90,63 % | [75,78 – 96,76] | 59,38 % | 21,88 % | 9,38 % | 9,38 % |
+| NO TOMAR | 4.193 | 87,96 % | [86,94 – 88,91] | 49,84 % | 25,02 % | 13,09 % | 12,04 % |
+| todas | 4.225 | 87,98 % | [86,96 – 88,92] | 49,92 % | 24,99 % | 13,07 % | 12,02 % |
 
-Separación TOMAR vs NO TOMAR: **+3,04 pp, z = 2,30** → distinguible del ruido
-al 95 %. (Retrospectivo: +2,67 pp, z = 2,61.)
+Separación TOMAR vs NO TOMAR: **+2,67 pp, z = 0,52** → **NO distinguible
+del ruido al 95 %**.
 
-Todos los TOMAR son de `tipo_racha = PLAYER`, consecuencia directa de §5.
+Todos los TOMAR son de `tipo_racha = PLAYER`, es decir apuestas a BANKER.
 
 ### Lectura honesta
 
-El filtro **sí** separa, y la separación sobrevive a su propio error estándar.
-Pero:
+**Con el umbral correcto, la estrategia no tiene ventaja demostrable.**
 
-- `z = 2,30` con una sola condición evaluada está apenas por encima del umbral
-  convencional. No es un resultado establecido, es un resultado que **amerita
-  seguir midiendo en vivo**, que es exactamente para lo que existe esta
-  estrategia.
-- El precio es el volumen: de 4.069 oportunidades se toman 600 (**14,75 %**).
+- Se toman **32 de 4.225** oportunidades (0,76 %), y esas 32 aciertan el
+  90,63 % contra el 87,96 % del resto: **z = 0,52**, indistinguible del
+  ruido. Con n=32 el IC95 va de 75,78 a 96,76: no dice nada.
+- Y estos números son **optimistas**: el backtest sólo evalúa la estimación
+  directa. En vivo se exige además la del modelo, que hoy da 87,54 contra un
+  umbral de 87,95 — así que el TOMAR real sería aún menor, probablemente
+  cero.
+- La razón de fondo está en §5.4: la ventaja por unidad apostada es negativa
+  (−0,212 % apostando BANKER), y ninguna escalera de martingala corrige un
+  porcentaje negativo. El peaje del empate (−1,15 % del importe) es mayor
+  que la ventaja del lado del banco (+0,94 %).
 - Los 1.000 descartes por muestra insuficiente son el arranque en frío del
-  walk-forward: hasta cruzar las 500 resueltas por condición no se toma nada.
-  En vivo eso ya está cubierto — el histórico existe.
+  walk-forward: hasta cruzar las 500 resueltas por condición no se toma
+  nada. En vivo eso ya está cubierto, el histórico existe.
+
+Comparación con el diseño anterior sobre los mismos datos: el umbral de
+86,87 tomaba **600 oportunidades (14,75 %)** y reportaba z = 2,30. Ese
+resultado venía de comparar un subgrupo contra el grupo que lo contiene, no
+de una ventaja económica. El umbral de equilibrio lo deshace.
 
 ---
 
@@ -642,6 +788,7 @@ nunca se asume evidencia favorable.
 | Archivo | Qué es |
 |---|---|
 | `src/core/racha3-test/wilson.ts` | `intervaloWilson()`, `Z_95`. Determinístico y acotado a [0,1]. |
+| `src/core/racha3-test/equilibrio.ts` | Punto de equilibrio, peaje de empates, EV por operación y ventaja por unidad apostada. Es donde vive el umbral. |
 | `src/core/racha3-test/types/racha3-test.type.ts` | `RACHA3_TEST_ID`, evidencia, contexto, gates, score, parámetros, evaluación, resolución. |
 | `src/core/racha3-test/racha3-test-score.calculator.ts` | `calcularRacha3TestScore()`. Función pura, sin estado oculto. |
 | `src/core/racha3-test/racha3-test-simulation.ts` | `Racha3TestSimulacion` sobre la `Operation` real. `RACHA3_TEST_MAX_MARTINGALAS = 2`. |
@@ -657,7 +804,7 @@ nunca se asume evidencia favorable.
 | `src/application/racha3-test/racha3-test-debug.notifier.ts` | Envía al canal DEBUG sin pasar por el dispatcher. |
 | `src/application/racha3-test/racha3-test.module.ts` | Cableado, incluido el canal DEBUG fuera de `NOTIFICATION_CHANNELS`. |
 
-### Tests — 100, todos en verde
+### Tests — 131, todos en verde
 
 ```bash
 pnpm test --testPathPatterns=racha3-test
@@ -665,8 +812,9 @@ pnpm test --testPathPatterns=racha3-test
 
 | Suite | n | Cubre |
 |---|---|---|
-| `core/racha3-test/wilson.spec.ts` | 7 | Reproduce 86,87 / 87,83 / 85,04; monotonía con la muestra; sin `NaN`; determinismo. |
-| `core/racha3-test/racha3-test-score.calculator.spec.ts` | 24 | Cada gate, cada nivel, el empate exacto, evidencia nula, la traza. |
+| `core/racha3-test/wilson.spec.ts` | 7 | Reproduce los límites inferiores del histórico; monotonía con la muestra; sin `NaN`; determinismo. |
+| `core/racha3-test/equilibrio.spec.ts` | 20 | El peaje medido, el umbral, que NO depende de los aciertos, y que una martingala sobre un juego simétrico da EV **exactamente cero** a cualquier profundidad. |
+| `core/racha3-test/racha3-test-score.calculator.spec.ts` | 35 | Umbral desde la estructura de pago, las dos estimaciones, cada gate, y que la devolución del empate voltea la decisión. |
 | `core/racha3-test/racha3-test-simulation.spec.ts` | 13 | DIRECTA/MG1/MG2/LOSS, TIE neutral y sin tope, `max_martingalas = 2`, ignora el trigger. |
 | `application/racha3-test/racha3-test.coordinator.spec.ts` | 29 | Detección, decisión, fallo seguro, logs estructurados y **el aislamiento de `streak-3`**. |
 | `application/racha3-test/racha3-test-simulation.registry.spec.ts` | 11 | Reserva, apertura, cierre, doble liberación. |
@@ -686,16 +834,16 @@ pnpm test --testPathPatterns=racha3-test         # las 7 suites
 
 Están acá porque documentarlas es más útil que esconderlas.
 
-1. **El umbral se derivó del mismo histórico sobre el que se mide.** Es fuga de
-   información **a nivel de diseño**, y el walk-forward no la corrige: corrige
-   la fuga en el cálculo de la tasa, no en la elección del umbral. Por eso 86,87
-   es un valor experimental inicial.
+1. **El umbral ya no se deriva del historial de aciertos** — sale de la
+   estructura de pago (§5.1). Lo único que toma de los datos es el peaje de
+   los empates, que es un coste medido, no un resultado. Queda una fuga
+   menor: ese peaje se mide sobre todo el histórico, no walk-forward.
 2. **El backtest excluye las oportunidades con
    `bloqueada_por_operacion_previa`** (50 de 4.102). Al filtrar, el hueco de
    «una operación a la vez» quedaría libre en momentos en que históricamente
    estaba ocupado, y ahí podrían haberse tomado algunas de esas. El backtest no
    las recupera. El sesgo existe, es conocido y no se estima.
-3. **`z = 2,30` no es un resultado establecido.** Con 2,67 pp de diferencia
+3. **No hay ventaja demostrable.** Con el umbral de equilibrio el Con 2,67 pp de diferencia
    entre PLAYER y BANKER, la potencia estadística exigiría ≈ 2.354
    oportunidades por grupo y hay ≈ 2.035.
 4. **La tasa histórica no es una probabilidad de la próxima jugada.** El score

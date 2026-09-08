@@ -1,10 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 import { WinnerType } from '../../core/enums/winner-type.enum';
+import type { TiesEnNivel } from '../../core/racha3-test/equilibrio';
 import {
   Racha3TestContexto,
   Racha3TestEstadoAnalytics,
   Racha3TestEvidencia,
+  Racha3TestLados,
 } from '../../core/racha3-test/types/racha3-test.type';
 import { Racha3AnalyticsReadModel } from '../analytics/racha3-analytics.read-model';
 
@@ -23,6 +25,12 @@ const UMBRAL_MUESTRA_ANALYTICS = 100;
 
 export type EvidenciaRecolectada = {
   readonly evidencia: Racha3TestEvidencia | null;
+  /** Segunda fuente: conteos de `jugadas` para la estimación por modelo. */
+  readonly lados: Racha3TestLados | null;
+  /** Empates por nivel de la escalera: definen el peaje y con él el umbral. */
+  readonly tiesPorNivel: readonly TiesEnNivel[];
+  /** Operaciones sobre las que se midió el peaje. */
+  readonly operacionesMedidas: number;
   readonly contexto: Racha3TestContexto;
   readonly estadoAnalytics: Racha3TestEstadoAnalytics;
 };
@@ -57,6 +65,12 @@ export class Racha3TestEvidenceProvider {
     horaColombia: number,
     diaSemana: number,
   ): Promise<EvidenciaRecolectada> {
+    // El lado que se apuesta es siempre el opuesto al de la racha.
+    const apuestaSql =
+      tipoRacha === WinnerType.PLAYER
+        ? ('BANKER' as const)
+        : ('PLAYER' as const);
+
     const filtros = {
       tipo:
         tipoRacha === WinnerType.PLAYER
@@ -82,10 +96,16 @@ export class Racha3TestEvidenceProvider {
     };
 
     try {
-      const [resumen, estado, distancia] = await Promise.all([
+      const [resumen, estado, distancia, lados, ties] = await Promise.all([
         this.analytics.resumen(filtros),
         this.analytics.estado(),
         this.analytics.distanciaActual([...COTAS], filtros),
+        this.analytics.ladosJugadas(filtros),
+        // Los empates se miden sobre el MISMO lado que se va a apostar: una
+        // apuesta a PLAYER llega más veces a los niveles altos, y ahí un
+        // empate cuesta el doble o el cuádruple. Promediar los dos lados
+        // subestimaría el peaje de uno y exageraría el del otro.
+        this.analytics.tiesPorNivel(apuestaSql, filtros),
       ]);
 
       const aciertos = resumen.directa + resumen.mg1 + resumen.mg2;
@@ -121,6 +141,16 @@ export class Racha3TestEvidenceProvider {
 
       return {
         evidencia,
+        lados: {
+          total: lados.total,
+          banker: lados.banker,
+          player: lados.player,
+          tie: lados.tie,
+          noTie: lados.no_tie,
+          corteId: lados.corte_id ?? 0,
+        },
+        tiesPorNivel: ties.map((t) => ({ nivel: t.nivel, ties: t.ties })),
+        operacionesMedidas: ties[0]?.operaciones ?? 0,
         contexto,
         estadoAnalytics: {
           disponible: true,
@@ -139,6 +169,9 @@ export class Racha3TestEvidenceProvider {
 
       return {
         evidencia: null,
+        lados: null,
+        tiesPorNivel: [],
+        operacionesMedidas: 0,
         contexto: contextoBase,
         estadoAnalytics: {
           disponible: false,

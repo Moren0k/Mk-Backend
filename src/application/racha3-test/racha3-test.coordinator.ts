@@ -45,10 +45,23 @@ import { Racha3TestSimulationRegistry } from './racha3-test-simulation.registry'
 const ESTRATEGIA_BASE_ID = 'streak-3';
 
 export const RACHA3_TEST_DEFAULTS = {
-  /** Límite inferior IC95 (Wilson) del histórico global al 2026-09-08. */
-  umbralScore: 86.87,
+  /**
+   * Piso adicional del umbral. 0 = manda el PUNTO DE EQUILIBRIO calculado,
+   * que es la única referencia con significado económico. El valor anterior
+   * (86,87, el límite inferior del IC95 del histórico global) comparaba un
+   * subgrupo contra el grupo que lo contiene y con dos categorías aprobaba
+   * una y rechazaba la otra por pura aritmética. Ver
+   * `core/racha3-test/equilibrio.ts`.
+   */
+  umbralMinimo: 0,
   muestraMinima: 500,
   maxRezagoJugadas: 50,
+  /** Progresión 1-2-4: pérdida por fallo 7, tres intentos. */
+  escalera: [1, 2, 4] as readonly number[],
+  /** Un empate devuelve el 90 %, así que cuesta el 10 % de lo apostado. */
+  devolucionTie: 0.9,
+  /** Pago 1:1 sin comisión, en los dos lados. */
+  pagoAcierto: 1,
 } as const;
 
 /**
@@ -142,9 +155,9 @@ export class Racha3TestCoordinator implements OnModuleInit, OnModuleDestroy {
   ) {
     this.habilitada = configService.get<boolean>('racha3Test.enabled', false);
     this.parametros = {
-      umbralScore: configService.get<number>(
-        'racha3Test.umbralScore',
-        RACHA3_TEST_DEFAULTS.umbralScore,
+      umbralMinimo: configService.get<number>(
+        'racha3Test.umbralMinimo',
+        RACHA3_TEST_DEFAULTS.umbralMinimo,
       ),
       muestraMinima: configService.get<number>(
         'racha3Test.muestraMinima',
@@ -153,6 +166,18 @@ export class Racha3TestCoordinator implements OnModuleInit, OnModuleDestroy {
       maxRezagoJugadas: configService.get<number>(
         'racha3Test.maxRezagoJugadas',
         RACHA3_TEST_DEFAULTS.maxRezagoJugadas,
+      ),
+      escalera: configService.get<readonly number[]>(
+        'racha3Test.escalera',
+        RACHA3_TEST_DEFAULTS.escalera,
+      ),
+      devolucionTie: configService.get<number>(
+        'racha3Test.devolucionTie',
+        RACHA3_TEST_DEFAULTS.devolucionTie,
+      ),
+      pagoAcierto: configService.get<number>(
+        'racha3Test.pagoAcierto',
+        RACHA3_TEST_DEFAULTS.pagoAcierto,
       ),
     };
   }
@@ -182,7 +207,9 @@ export class Racha3TestCoordinator implements OnModuleInit, OnModuleDestroy {
     this.domainEventBus.subscribe(GameReceivedEvent.eventName, this.handler);
     this.logger.log(
       `Racha 3 Test ACTIVA (experimental, sin operaciones reales). ` +
-        `umbral=${this.parametros.umbralScore} ` +
+        `umbralMinimo=${this.parametros.umbralMinimo} ` +
+        `escalera=[${this.parametros.escalera.join(',')}] ` +
+        `devolucionTie=${this.parametros.devolucionTie} ` +
         `muestraMinima=${this.parametros.muestraMinima} ` +
         `maxRezago=${this.parametros.maxRezagoJugadas}`,
     );
@@ -290,6 +317,10 @@ export class Racha3TestCoordinator implements OnModuleInit, OnModuleDestroy {
 
       const score = calcularRacha3TestScore({
         evidencia: recolectada.evidencia,
+        lados: recolectada.lados,
+        tiesPorNivel: recolectada.tiesPorNivel,
+        operacionesMedidas: recolectada.operacionesMedidas,
+        apuesta: señal.recommendedWinner,
         contexto: recolectada.contexto,
         estadoAnalytics: recolectada.estadoAnalytics,
         // La reserva propia no cuenta como operación abierta: el hueco lo
@@ -301,6 +332,9 @@ export class Racha3TestCoordinator implements OnModuleInit, OnModuleDestroy {
       this.logger.log(
         `racha3_test_score evaluacionId=${evaluacionId} score=${score.score ?? 'null'} ` +
           `umbral=${score.umbral} nivel=${score.nivel} ` +
+          `directo=${score.scoreDirecto ?? 'n/d'} modelo=${score.scoreModelo ?? 'n/d'} ` +
+          `ev=${score.economia.evEstimado?.toFixed(5) ?? 'n/d'} ` +
+          `peajeTie=${score.economia.peajeTiePorOperacion.toFixed(5)} ` +
           `muestraN=${score.componentes.muestra.muestraN} ` +
           `tasaObservada=${score.componentes.historico.tasaObservada?.toFixed(6) ?? 'n/d'} ` +
           `icInferior=${score.componentes.intervalo?.limiteInferior.toFixed(6) ?? 'n/d'} ` +

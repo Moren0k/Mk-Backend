@@ -111,7 +111,31 @@ export default () => ({
     // tasa defendible sea al menos tan buena como el histórico completo".
     // Es el umbral experimental INICIAL, no un valor universal: al crecer
     // el histórico el límite se mueve y hay que revisarlo.
-    umbralScore: parseFloat(process.env.RACHA3_TEST_SCORE_THRESHOLD ?? '86.87'),
+    // Umbral MÍNIMO exigido. El umbral efectivo es el mayor entre éste y el
+    // PUNTO DE EQUILIBRIO calculado, así que este parámetro sólo puede
+    // hacer el sistema más exigente, nunca menos.
+    //
+    // El default es 0 a propósito: el equilibrio manda. Antes esto era 86,87
+    // (el límite inferior del IC95 del histórico global), un umbral
+    // incoherente — comparaba un subgrupo contra el grupo que lo contiene, y
+    // con dos categorías siempre aprobaba una y rechazaba la otra por pura
+    // aritmética. Ver `core/racha3-test/equilibrio.ts`.
+    umbralMinimo: parseFloat(process.env.RACHA3_TEST_UMBRAL_MINIMO ?? '0'),
+    // Importe apostado en cada nivel. Define la pérdida por fallo (su suma)
+    // y el número de intentos (su longitud). Debe coincidir con la
+    // progresión real y con `max_martingalas`.
+    escalera: (process.env.RACHA3_TEST_ESCALERA ?? '1,2,4')
+      .split(',')
+      .map((x) => parseFloat(x.trim()))
+      .filter((x) => Number.isFinite(x) && x > 0),
+    // Fracción del importe que devuelve un empate. 0.90 = devuelve el 90 %,
+    // es decir CUESTA el 10 %. No es gratis, y con empates en el 11,5 % de
+    // las rondas ese 10 % mueve el equilibrio de 87,500 % a 87,983 % — más
+    // que toda la ventaja del lado del banco. Si en la mesa devuelven el
+    // 100 %, poner 1 aquí vuelve la estrategia rentable.
+    devolucionTie: parseFloat(process.env.RACHA3_TEST_DEVOLUCION_TIE ?? '0.9'),
+    // Ganancia neta de un acierto, en unidades. 1 = pago 1:1 sin comisión.
+    pagoAcierto: parseFloat(process.env.RACHA3_TEST_PAGO_ACIERTO ?? '1'),
     // Mínimo de oportunidades resueltas que debe respaldar la condición.
     // Bajo esto se descarta sin importar el score: una muestra insuficiente
     // no se compensa con puntos.

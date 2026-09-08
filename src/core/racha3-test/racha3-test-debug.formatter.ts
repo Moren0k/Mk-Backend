@@ -120,6 +120,39 @@ function cuerpo(e: Racha3TestEvaluacion): string {
       ? `Score: sin evidencia (umbral ${s.umbral})`
       : `Score: ${s.score} / 100 · umbral ${s.umbral} · nivel ${s.nivel}`,
   );
+  if (s.scoreDirecto !== null || s.scoreModelo !== null) {
+    L.push(
+      `  = min(directa ${s.scoreDirecto ?? 'n/d'}, modelo ${s.scoreModelo ?? 'n/d'}) — se exigen las dos`,
+    );
+  }
+
+  // ---------- ECONOMÍA: de aquí sale el umbral ----------
+  L.push('');
+  L.push('ECONOMÍA DE LA APUESTA (de aquí sale el umbral, no del historial)');
+  L.push(
+    `• gana +${s.economia.gananciaPorAcierto} · falla −${s.economia.perdidaPorFallo} · ` +
+      `empate devuelve ${(100 * s.economia.devolucionTie).toFixed(0)} %, ` +
+      `o sea cuesta el ${(100 * (1 - s.economia.devolucionTie)).toFixed(0)} % de lo apostado`,
+  );
+  L.push(
+    `• peaje de empates: ${s.economia.peajeTiePorOperacion.toFixed(5)} unidades por operación`,
+  );
+  L.push(
+    `• equilibrio sin empates ${(100 * s.economia.umbralSinTie).toFixed(3)} % → ` +
+      `con empates ${s.umbral} (es el umbral)`,
+  );
+  L.push(
+    s.economia.evEstimado === null
+      ? '• EV estimado: n/d (sin evidencia)'
+      : `• EV estimado: ${s.economia.evEstimado.toFixed(5)} unidades por operación ` +
+          `${s.economia.evEstimado > 0 ? '(positivo)' : '(NEGATIVO: la apuesta pierde dinero)'}`,
+  );
+  if (s.economia.ventajaPorUnidad !== null) {
+    L.push(
+      `• ventaja por unidad apostada: ${(100 * s.economia.ventajaPorUnidad).toFixed(3)} % ` +
+        '— ninguna escalera de martingala la cambia',
+    );
+  }
 
   // ---------- EVIDENCIA (lo que sí pesa) ----------
   L.push('');
@@ -151,6 +184,27 @@ function cuerpo(e: Racha3TestEvaluacion): string {
       `• Excluidas de la evidencia: ${ev.muestraBloqueadasExcluidas} bloqueadas · ` +
         `${ev.muestraIntegridadDudosa} con integridad dudosa incluidas`,
     );
+  }
+
+  // ---------- MODELO (segunda estimacion) ----------
+  L.push('');
+  L.push('ESTIMACION POR MODELO (jugadas, ~9x mas muestra)');
+  const m = s.componentes.modelo;
+  if (m === null) {
+    L.push('• Sin conteos de jugadas disponibles.');
+  } else {
+    L.push(
+      `• lado apostado ${m.lado}: gana ${m.gana} · pierde ${m.pierde} · empata ${m.empata}`,
+    );
+    L.push(
+      `• ventaja del lado (sin contar empates): ${m.omega.toFixed(6)} · ` +
+        `IC95 [${m.intervaloOmega.limiteInferior.toFixed(6)}, ${m.intervaloOmega.limiteSuperior.toFixed(6)}]`,
+    );
+    L.push(
+      `• tasa de la escalera = 1 − (1−ω)^${m.intentos}: esperada ` +
+        `${(100 * m.tasaEsperada).toFixed(3)} %, limite inferior ${(100 * m.tasaLimiteInferior).toFixed(3)} %`,
+    );
+    L.push('• supone rondas independientes (medido: P(sigue|k) plana en 0,44)');
   }
 
   // ---------- CONTEXTO (peso 0) ----------

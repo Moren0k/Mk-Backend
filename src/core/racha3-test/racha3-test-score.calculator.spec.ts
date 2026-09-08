@@ -4,49 +4,52 @@ import {
   Racha3TestContexto,
   Racha3TestEstadoAnalytics,
   Racha3TestEvidencia,
+  Racha3TestLados,
   Racha3TestParametros,
 } from './types/racha3-test.type';
 
-const PARAMS: Racha3TestParametros = {
-  umbralScore: 86.87,
-  muestraMinima: 500,
-  maxRezagoJugadas: 50,
-};
-
-/** Evidencia real de PLAYER al 2026-09-08: score esperado 87.83. */
-const PLAYER: Racha3TestEvidencia = {
+/**
+ * Fixtures con los CONTEOS REALES del histórico al 2026-09-09, para que las
+ * pruebas fijen los números con los que se justificó el rediseño y no unos
+ * inventados.
+ */
+const EVIDENCIA_PLAYER: Racha3TestEvidencia = {
   condicion: 'tipo_racha=PLAYER',
   tipoRacha: WinnerType.PLAYER,
-  aciertos: 1802,
-  resueltas: 2019,
-  directa: 1048,
-  mg1: 483,
-  mg2: 271,
-  perdidas: 217,
-  muestraN: 2019,
+  aciertos: 1873,
+  resueltas: 2095,
+  directa: 1089,
+  mg1: 502,
+  mg2: 282,
+  perdidas: 222,
+  muestraN: 2095,
   advertenciaMuestra: null,
   muestraBloqueadasExcluidas: 25,
-  muestraIntegridadDudosa: 4,
-  ventanaDesde: '2026-08-21T18:23:15.232Z',
-  ventanaHasta: '2026-09-08T01:00:00.000Z',
+  muestraIntegridadDudosa: 0,
+  ventanaDesde: null,
+  ventanaHasta: null,
 };
 
-/** Evidencia real de BANKER: score esperado 85.04 (bajo el umbral). */
-const BANKER: Racha3TestEvidencia = {
-  ...PLAYER,
-  condicion: 'tipo_racha=BANKER',
-  tipoRacha: WinnerType.BANKER,
-  aciertos: 1775,
-  resueltas: 2050,
-  directa: 991,
-  mg1: 531,
-  mg2: 253,
-  perdidas: 275,
-  muestraN: 2050,
+/** Distribución real de `jugadas`: BANKER gana un poco más que PLAYER. */
+const LADOS: Racha3TestLados = {
+  total: 44139,
+  banker: 19733,
+  player: 19312,
+  tie: 5094,
+  noTie: 39045,
+  corteId: 44718,
 };
+
+/** Empates por nivel de las operaciones que apostaron BANKER. */
+const TIES_BANKER = [
+  { nivel: 0, ties: 269 },
+  { nivel: 1, ties: 126 },
+  { nivel: 2, ties: 57 },
+];
+const OPERACIONES_BANKER = 2095;
 
 const CONTEXTO: Racha3TestContexto = {
-  horaColombia: 21,
+  horaColombia: 10,
   diaSemana: 2,
   distanciaActual: 7,
   distanciaExacta: true,
@@ -59,276 +62,419 @@ const CONTEXTO: Racha3TestContexto = {
 const ESTADO_OK: Racha3TestEstadoAnalytics = {
   disponible: true,
   checkpointExiste: true,
-  jugadasSinProcesar: 2,
-  totalOportunidades: 4119,
+  jugadasSinProcesar: 1,
+  totalOportunidades: 4220,
   error: null,
 };
 
-const calcular = (
-  over: Partial<{
-    evidencia: Racha3TestEvidencia | null;
-    contexto: Racha3TestContexto;
-    estadoAnalytics: Racha3TestEstadoAnalytics;
-    operacionVirtualAbierta: boolean;
-    parametros: Racha3TestParametros;
-  }> = {},
-) =>
-  calcularRacha3TestScore({
-    evidencia: PLAYER,
+const PARAMETROS: Racha3TestParametros = {
+  umbralMinimo: 0,
+  muestraMinima: 500,
+  maxRezagoJugadas: 50,
+  escalera: [1, 2, 4],
+  devolucionTie: 0.9,
+  pagoAcierto: 1,
+};
+
+type Entrada = Parameters<typeof calcularRacha3TestScore>[0];
+
+function calcular(cambios: Partial<Entrada> = {}) {
+  return calcularRacha3TestScore({
+    evidencia: EVIDENCIA_PLAYER,
+    lados: LADOS,
+    tiesPorNivel: TIES_BANKER,
+    operacionesMedidas: OPERACIONES_BANKER,
+    apuesta: WinnerType.BANKER,
     contexto: CONTEXTO,
     estadoAnalytics: ESTADO_OK,
     operacionVirtualAbierta: false,
-    parametros: PARAMS,
-    ...over,
+    parametros: PARAMETROS,
+    ...cambios,
   });
+}
 
 const gate = (r: ReturnType<typeof calcular>, nombre: string) =>
   r.gates.find((g) => g.gate === nombre);
 
 describe('calcularRacha3TestScore', () => {
-  describe('fórmula', () => {
-    it('el score ES 100 × límite inferior del IC95, con los datos reales de PLAYER', () => {
+  describe('el umbral sale de la estructura de pago, no del historial', () => {
+    it('con la escalera 1-2-4 y devolución 0,9 el umbral es 87,95', () => {
+      // (7 + 74,90/2095) / 8 = 87,947 % → 87,95.
       const r = calcular();
-      expect(r.score).toBe(87.83);
-      expect(r.componentes.intervalo?.limiteInferior).toBeCloseTo(0.878258, 6);
-      expect(100 * (r.componentes.intervalo?.limiteInferior ?? 0)).toBeCloseTo(
-        87.83,
-        2,
+
+      expect(r.umbral).toBe(87.95);
+      expect(r.economia.perdidaPorFallo).toBe(7);
+      expect(r.economia.peajeTiePorOperacion).toBeCloseTo(0.035752, 6);
+      expect(100 * r.economia.umbralSinTie).toBeCloseTo(87.5, 6);
+    });
+
+    it('NO depende de la tasa de acierto: cambiarla no mueve el umbral', () => {
+      // Es la propiedad que arregla el defecto del diseño anterior, donde
+      // el umbral salía del propio historial de aciertos y con dos
+      // categorías aprobaba una y rechazaba la otra por aritmética.
+      const base = calcular().umbral;
+
+      expect(
+        calcular({
+          evidencia: { ...EVIDENCIA_PLAYER, aciertos: 1000, perdidas: 1095 },
+        }).umbral,
+      ).toBe(base);
+      expect(
+        calcular({
+          evidencia: { ...EVIDENCIA_PLAYER, aciertos: 2095, perdidas: 0 },
+        }).umbral,
+      ).toBe(base);
+    });
+
+    it('sí depende del coste: un empate más caro sube el umbral', () => {
+      expect(
+        calcular({ parametros: { ...PARAMETROS, devolucionTie: 1 } }).umbral,
+      ).toBeLessThan(calcular().umbral);
+      expect(
+        calcular({ parametros: { ...PARAMETROS, devolucionTie: 0.5 } }).umbral,
+      ).toBeGreaterThan(calcular().umbral);
+    });
+
+    it('una escalera más profunda sube la pérdida y el equilibrio', () => {
+      const r = calcular({
+        parametros: { ...PARAMETROS, escalera: [1, 2, 4, 8] },
+      });
+
+      expect(r.economia.perdidaPorFallo).toBe(15);
+      expect(100 * r.economia.umbralSinTie).toBeCloseTo(93.75, 6);
+    });
+
+    it('`umbralMinimo` solo puede hacerlo más exigente, nunca menos', () => {
+      expect(
+        calcular({ parametros: { ...PARAMETROS, umbralMinimo: 50 } }).umbral,
+      ).toBe(87.95);
+      expect(
+        calcular({ parametros: { ...PARAMETROS, umbralMinimo: 95 } }).umbral,
+      ).toBe(95);
+    });
+  });
+
+  describe('las dos estimaciones', () => {
+    it('la DIRECTA es el límite inferior del IC95 de los conteos', () => {
+      const r = calcular();
+
+      expect(r.scoreDirecto).toBe(88.01);
+      expect(r.componentes.intervalo?.limiteInferior).toBeCloseTo(
+        0.88012449,
+        8,
+      );
+      expect(r.componentes.historico.tasaObservada).toBeCloseTo(
+        1873 / 2095,
+        10,
       );
     });
 
-    it('calcula la tasa de los CONTEOS, no de una tasa redondeada', () => {
+    it('la del MODELO propaga el IC de la ventaja del lado por la escalera', () => {
       const r = calcular();
-      expect(r.componentes.historico.tasaObservada).toBeCloseTo(0.89252105, 8);
-      expect(r.componentes.historico.aciertos).toBe(1802);
-      expect(r.componentes.historico.resueltas).toBe(2019);
+      const m = r.componentes.modelo!;
+
+      expect(m.lado).toBe(WinnerType.BANKER);
+      expect(m.gana).toBe(19733);
+      expect(m.pierde).toBe(19312);
+      expect(m.omega).toBeCloseTo(19733 / 39045, 10);
+      expect(m.intentos).toBe(3);
+      // 1 − (1−ω)³ aplicado al límite inferior de ω: exacto por monotonía,
+      // sin método delta.
+      expect(m.tasaLimiteInferior).toBeCloseTo(
+        1 - Math.pow(1 - m.intervaloOmega.limiteInferior, 3),
+        12,
+      );
+      expect(r.scoreModelo).toBe(87.53);
     });
 
-    it('BANKER da 85.04 y queda bajo el umbral', () => {
-      const r = calcular({ evidencia: BANKER });
-      expect(r.score).toBe(85.04);
+    it('el score que decide es el MENOR de los dos', () => {
+      const r = calcular();
+
+      expect(r.score).toBe(Math.min(r.scoreDirecto!, r.scoreModelo!));
+      expect(r.score).toBe(87.53);
+    });
+
+    it('usa el lado correcto: apostar PLAYER invierte los conteos', () => {
+      const r = calcular({ apuesta: WinnerType.PLAYER });
+      const m = r.componentes.modelo!;
+
+      expect(m.gana).toBe(19312);
+      expect(m.pierde).toBe(19733);
+      expect(r.scoreModelo!).toBeLessThan(calcular().scoreModelo!);
+    });
+  });
+
+  describe('la decisión', () => {
+    it('con los datos reales y devolución del 90 %: NO TOMAR', () => {
+      // El resultado honesto del histórico actual: incluso la mejor apuesta
+      // posible (BANKER) no llega al punto de equilibrio.
+      const r = calcular();
+
+      expect(r.tomar).toBe(false);
+      expect(r.nivel).toBe('BAJO_UMBRAL');
+      expect(gate(r, 'SCORE_BAJO_UMBRAL')?.disparado).toBe(true);
+      expect(r.economia.evEstimado!).toBeLessThan(0);
+    });
+
+    it('con devolución del 100 % la MISMA evidencia pasa a TOMAR', () => {
+      // El parámetro que voltea el signo de la estrategia entera: sin peaje
+      // el equilibrio baja a 87,50 y el score de 87,53 ya lo supera.
+      const r = calcular({ parametros: { ...PARAMETROS, devolucionTie: 1 } });
+
+      expect(r.umbral).toBe(87.5);
+      expect(r.score).toBe(87.53);
+      expect(r.tomar).toBe(true);
+      expect(r.economia.evEstimado!).toBeGreaterThan(0);
+    });
+
+    it('exige las DOS: si la directa falla, no toma aunque el modelo pase', () => {
+      const r = calcular({
+        parametros: { ...PARAMETROS, devolucionTie: 1 },
+        evidencia: { ...EVIDENCIA_PLAYER, aciertos: 1800, perdidas: 295 },
+      });
+
+      expect(r.scoreModelo!).toBeGreaterThanOrEqual(r.umbral);
+      expect(r.scoreDirecto!).toBeLessThan(r.umbral);
+      expect(r.tomar).toBe(false);
+    });
+
+    it('empate exacto con el umbral → TOMAR (la regla es >=)', () => {
+      const r = calcular({
+        parametros: { ...PARAMETROS, devolucionTie: 1, umbralMinimo: 87.53 },
+      });
+
+      expect(r.score).toBe(r.umbral);
+      expect(r.nivel).toBe('EN_UMBRAL');
+      expect(r.tomar).toBe(true);
+    });
+
+    it('un centésimo por encima del score → NO TOMAR', () => {
+      const r = calcular({
+        parametros: { ...PARAMETROS, devolucionTie: 1, umbralMinimo: 87.54 },
+      });
+
       expect(r.tomar).toBe(false);
       expect(r.nivel).toBe('BAJO_UMBRAL');
     });
+  });
 
-    it('es determinístico y reproducible', () => {
-      const a = calcular();
-      const b = calcular();
-      expect(a.score).toBe(b.score);
-      expect(a.traza).toEqual(b.traza);
-      expect(a.gates).toEqual(b.gates);
+  describe('la ventaja por unidad', () => {
+    it('es negativa apostando BANKER con devolución del 90 %', () => {
+      const r = calcular();
+
+      expect(r.economia.ventajaPorUnidad!).toBeLessThan(0);
+      expect(r.razones.join(' ')).toContain('ninguna escalera');
     });
 
-    it('no aplica ninguna penalización numérica (por diseño)', () => {
-      // Lo que degrada la decisión está modelado como gate o advertencia:
-      // restar puntos inventados sería el peso artificial que se evita.
-      expect(calcular().penalizaciones).toEqual([]);
+    it('es positiva con devolución del 100 %', () => {
       expect(
-        calcular({
-          evidencia: { ...PLAYER, advertenciaMuestra: 'muestra_n < 100' },
-        }).penalizaciones,
-      ).toEqual([]);
+        calcular({ parametros: { ...PARAMETROS, devolucionTie: 1 } }).economia
+          .ventajaPorUnidad!,
+      ).toBeGreaterThan(0);
     });
   });
 
-  describe('la traza permite verificar el score a mano', () => {
-    it('incluye conteos, tasa, IC, score, gates y decisión, en orden', () => {
-      const t = calcular().traza;
-      expect(t[0]).toContain('aciertos=1802 de resueltas=2019');
-      expect(t[1]).toContain('1802/2019');
-      expect(t[2]).toContain('IC95 Wilson');
-      expect(t[3]).toContain('score = 100 × límite_inferior');
-      expect(t[3]).toContain('87.83');
-      expect(t[5]).toContain('Gates');
-      expect(t[6]).toContain('Decisión: TOMAR');
-    });
-  });
-
-  describe('umbral', () => {
-    it('score por encima del umbral → TOMAR', () => {
-      const r = calcular({ parametros: { ...PARAMS, umbralScore: 80 } });
-      expect(r.tomar).toBe(true);
-      expect(r.nivel).toBe('SOBRE_UMBRAL');
-    });
-
-    it('score EXACTAMENTE igual al umbral → TOMAR (la regla es >=)', () => {
-      const r = calcular({ parametros: { ...PARAMS, umbralScore: 87.83 } });
-      expect(r.score).toBe(87.83);
-      expect(r.tomar).toBe(true);
-      expect(r.nivel).toBe('EN_UMBRAL');
-      expect(gate(r, 'SCORE_BAJO_UMBRAL')?.disparado).toBe(false);
-    });
-
-    it('score un centésimo por debajo del umbral → NO TOMAR', () => {
-      const r = calcular({ parametros: { ...PARAMS, umbralScore: 87.84 } });
-      expect(r.tomar).toBe(false);
-      expect(gate(r, 'SCORE_BAJO_UMBRAL')?.disparado).toBe(true);
-    });
-  });
-
-  describe('gate: muestra insuficiente', () => {
-    it('bloquea aunque el score sea alto, y NO se compensa con puntos', () => {
-      // 95 de 100 tiene mejor tasa que 1802/2019, pero muestra insuficiente.
-      const r = calcular({
-        evidencia: { ...PLAYER, aciertos: 95, resueltas: 100, muestraN: 100 },
-        parametros: { ...PARAMS, umbralScore: 80 },
-      });
-      expect(r.componentes.muestra.suficiente).toBe(false);
-      expect(gate(r, 'MUESTRA_INSUFICIENTE')?.disparado).toBe(true);
-      expect(r.tomar).toBe(false);
-      expect(r.razones.some((x) => x.includes('Muestra insuficiente'))).toBe(
-        true,
-      );
-    });
-
-    it('exactamente en el mínimo NO bloquea (la regla es >=)', () => {
-      const r = calcular({
-        evidencia: { ...PLAYER, aciertos: 470, resueltas: 500, muestraN: 500 },
-        parametros: { ...PARAMS, umbralScore: 80 },
-      });
-      expect(gate(r, 'MUESTRA_INSUFICIENTE')?.disparado).toBe(false);
-      expect(r.tomar).toBe(true);
-    });
-  });
-
-  describe('gate: Analytics sin evidencia', () => {
-    it('un error de Analytics NUNCA produce score favorable', () => {
+  describe('gates', () => {
+    it('sin evidencia directa: score null y NO TOMAR', () => {
       const r = calcular({
         evidencia: null,
         estadoAnalytics: {
+          ...ESTADO_OK,
           disponible: false,
-          checkpointExiste: false,
-          jugadasSinProcesar: 0,
-          totalOportunidades: 0,
           error: "Can't reach database server",
         },
       });
+
       expect(r.score).toBeNull();
+      expect(r.scoreDirecto).toBeNull();
+      expect(r.scoreModelo).toBeNull();
       expect(r.nivel).toBe('SIN_EVIDENCIA');
       expect(r.tomar).toBe(false);
       expect(gate(r, 'ANALYTICS_SIN_EVIDENCIA')?.disparado).toBe(true);
-      expect(r.razones.some((x) => x.includes("Can't reach"))).toBe(true);
+      expect(r.componentes.intervalo).toBeNull();
+      expect(r.componentes.modelo).toBeNull();
+      expect(r.economia.evEstimado).toBeNull();
     });
 
-    it('Analytics disponible pero sin datos para la condición también bloquea', () => {
-      const r = calcular({
-        evidencia: { ...PLAYER, aciertos: 0, resueltas: 0, muestraN: 0 },
-      });
+    it('sin conteos de jugadas: bloquea aunque la directa alcance', () => {
+      const r = calcular({ lados: null });
+
+      expect(gate(r, 'MODELO_SIN_EVIDENCIA')?.disparado).toBe(true);
       expect(r.score).toBeNull();
       expect(r.tomar).toBe(false);
     });
 
-    it('no inventa un intervalo cuando no hay evidencia', () => {
+    it('Analytics disponible pero sin resueltas también bloquea', () => {
       const r = calcular({
-        evidencia: null,
-        estadoAnalytics: { ...ESTADO_OK, disponible: false },
+        evidencia: { ...EVIDENCIA_PLAYER, resueltas: 0, aciertos: 0 },
       });
-      expect(r.componentes.intervalo).toBeNull();
-      expect(r.componentes.historico.tasaObservada).toBeNull();
-    });
-  });
 
-  describe('gate: Analytics rezagado', () => {
-    it('bloquea cuando el rezago supera el máximo, aunque el score alcance', () => {
+      expect(gate(r, 'ANALYTICS_SIN_EVIDENCIA')?.disparado).toBe(true);
+      expect(r.tomar).toBe(false);
+    });
+
+    it('muestra insuficiente bloquea y no se compensa con score', () => {
       const r = calcular({
-        estadoAnalytics: { ...ESTADO_OK, jugadasSinProcesar: 371 },
-        parametros: { ...PARAMS, umbralScore: 80 },
+        parametros: { ...PARAMETROS, devolucionTie: 1, muestraMinima: 5000 },
       });
-      expect(r.score).toBe(87.83);
+
+      expect(r.score!).toBeGreaterThanOrEqual(r.umbral);
+      expect(gate(r, 'MUESTRA_INSUFICIENTE')?.disparado).toBe(true);
+      expect(r.tomar).toBe(false);
+    });
+
+    it('exactamente en el mínimo de muestra NO bloquea', () => {
+      const r = calcular({
+        parametros: { ...PARAMETROS, muestraMinima: 2095 },
+      });
+
+      expect(gate(r, 'MUESTRA_INSUFICIENTE')?.disparado).toBe(false);
+    });
+
+    it('rezago por encima del máximo bloquea aunque el score alcance', () => {
+      const r = calcular({
+        parametros: { ...PARAMETROS, devolucionTie: 1 },
+        estadoAnalytics: { ...ESTADO_OK, jugadasSinProcesar: 371 },
+      });
+
+      expect(r.score!).toBeGreaterThanOrEqual(r.umbral);
       expect(gate(r, 'ANALYTICS_REZAGADO')?.disparado).toBe(true);
       expect(r.tomar).toBe(false);
     });
 
-    it('exactamente en el máximo no bloquea', () => {
+    it('exactamente en el máximo de rezago no bloquea', () => {
       const r = calcular({
         estadoAnalytics: { ...ESTADO_OK, jugadasSinProcesar: 50 },
-        parametros: { ...PARAMS, umbralScore: 80 },
       });
-      expect(gate(r, 'ANALYTICS_REZAGADO')?.disparado).toBe(false);
-      expect(r.tomar).toBe(true);
-    });
-  });
 
-  describe('gate: operación virtual abierta', () => {
-    it('bloquea aunque todo lo demás dé para tomar', () => {
+      expect(gate(r, 'ANALYTICS_REZAGADO')?.disparado).toBe(false);
+    });
+
+    it('operación virtual abierta bloquea', () => {
       const r = calcular({
+        parametros: { ...PARAMETROS, devolucionTie: 1 },
         operacionVirtualAbierta: true,
-        parametros: { ...PARAMS, umbralScore: 80 },
       });
+
       expect(gate(r, 'OPERACION_VIRTUAL_ABIERTA')?.disparado).toBe(true);
       expect(r.tomar).toBe(false);
     });
   });
 
   describe('contexto: peso 0 explícito', () => {
-    it('el contexto viaja con peso 0 y no altera el score', () => {
-      const base = calcular().score;
-
-      for (const contexto of [
-        { ...CONTEXTO, horaColombia: 4, diaSemana: 0 },
-        {
+    it('viaja con peso 0 y no altera el score ni el umbral', () => {
+      const r = calcular();
+      const otro = calcular({
+        contexto: {
           ...CONTEXTO,
-          distanciaActual: 51,
-          bucketDistancia: '51+',
-          hazardBucket: 0.1081,
+          horaColombia: 3,
+          diaSemana: 6,
+          distanciaActual: 42,
+          bucketDistancia: '31-50',
+          hazardBucket: 0.99,
         },
-        { ...CONTEXTO, hazardBucket: 0.99, frecuenciaHistoricaBucket: 0.99 },
-      ]) {
-        const r = calcular({ contexto });
-        expect(r.score).toBe(base);
-        expect(r.componentes.contexto.peso).toBe(0);
-      }
+      });
+
+      expect(r.componentes.contexto.peso).toBe(0);
+      expect(otro.score).toBe(r.score);
+      expect(otro.umbral).toBe(r.umbral);
     });
 
     it('conserva el hazard y la frecuencia como campos distintos', () => {
-      // Son magnitudes distintas y no comparables; el DEBUG las muestra
-      // separadas justamente para que no se confundan.
       const c = calcular().componentes.contexto;
+
       expect(c.hazardBucket).toBe(0.1326);
       expect(c.frecuenciaHistoricaBucket).toBe(0.3819);
+      expect(c.hazardBucket).not.toBe(c.frecuenciaHistoricaBucket);
     });
   });
 
   describe('advertencias (informan, no castigan)', () => {
+    it('avisa cuando las dos estimaciones difieren en más de un punto', () => {
+      // 88,01 contra 87,53: la directa viene por encima del modelo, y con
+      // ~9x menos muestra eso suele ser suerte.
+      const r = calcular({
+        evidencia: { ...EVIDENCIA_PLAYER, aciertos: 1950, perdidas: 145 },
+      });
+
+      expect(r.advertencias.join(' ')).toContain('difieren');
+      expect(r.advertencias.join(' ')).toContain('9×');
+    });
+
     it('reporta la advertencia de muestra de Analytics sin tocar el score', () => {
       const r = calcular({
-        evidencia: { ...PLAYER, advertenciaMuestra: 'muestra_n < 100' },
+        evidencia: {
+          ...EVIDENCIA_PLAYER,
+          advertenciaMuestra: 'muestra_n < 100',
+        },
       });
-      expect(r.score).toBe(87.83);
-      expect(r.advertencias.some((a) => a.includes('muestra_n < 100'))).toBe(
-        true,
-      );
+
+      expect(r.advertencias.join(' ')).toContain('muestra_n < 100');
+      expect(r.score).toBe(calcular().score);
     });
 
     it('advierte si la distancia no es exacta, sin tocar el score', () => {
       const r = calcular({ contexto: { ...CONTEXTO, distanciaExacta: false } });
-      expect(r.score).toBe(87.83);
-      expect(r.advertencias.some((a) => a.includes('no es exacta'))).toBe(true);
+
+      expect(r.advertencias.join(' ')).toContain('no es exacta');
+      expect(r.score).toBe(calcular().score);
     });
 
     it('advierte si la corrida empieza tras un hueco del historial', () => {
       const r = calcular({
         contexto: { ...CONTEXTO, columnaConCortePorGap: true },
       });
-      expect(
-        r.advertencias.some((a) => a.includes('discontinuidad del historial')),
-      ).toBe(true);
+
+      expect(r.advertencias.join(' ')).toContain('discontinuidad');
+      expect(r.score).toBe(calcular().score);
     });
 
-    it('advierte cuántas filas de integridad dudosa hay en la evidencia', () => {
-      const r = calcular();
-      expect(r.advertencias.some((a) => a.includes('integridad dudosa'))).toBe(
-        true,
-      );
+    it('advierte cuántas filas de integridad dudosa hay', () => {
+      const r = calcular({
+        evidencia: { ...EVIDENCIA_PLAYER, muestraIntegridadDudosa: 7 },
+      });
+
+      expect(r.advertencias.join(' ')).toContain('7 oportunidad');
+      expect(r.score).toBe(calcular().score);
+    });
+
+    it('advierte si no hay operaciones con las que medir el peaje', () => {
+      const r = calcular({ operacionesMedidas: 0, tiesPorNivel: [] });
+
+      expect(r.advertencias.join(' ')).toContain('MENOS exigente');
+      expect(r.umbral).toBe(87.5);
     });
   });
 
-  describe('no usa vocabulario predictivo', () => {
-    it('ningún campo ni texto dice probabilidad, prediccion o confianza', () => {
-      const json = JSON.stringify(calcular()).toLowerCase();
-      expect(json).not.toContain('probabilidad');
-      expect(json).not.toContain('prediccion');
-      expect(json).not.toContain('confianza');
+  describe('trazabilidad', () => {
+    it('la traza recorre umbral, las dos estimaciones, score y decisión', () => {
+      const t = calcular().traza.join('\n');
+
+      expect(t).toContain('estructura de pago');
+      expect(t).toContain('escalera = [1, 2, 4]');
+      expect(t).toContain('empates');
+      expect(t).toContain('DIRECTA');
+      expect(t).toContain('IC95 Wilson');
+      expect(t).toContain('MODELO');
+      expect(t).toContain('ventaja por unidad');
+      expect(t).toContain('score = min(');
+      expect(t).toContain('EV estimado');
+      expect(t).toContain('Gates:');
+      expect(t).toContain('Decisión:');
+    });
+
+    it('es determinística y no aplica penalizaciones numéricas', () => {
+      expect(calcular()).toEqual(calcular());
+      expect(calcular().penalizaciones).toEqual([]);
+    });
+
+    it('no usa vocabulario predictivo', () => {
+      const texto = JSON.stringify(calcular()).toLowerCase();
+
+      expect(texto).not.toContain('probabilidad');
+      expect(texto).not.toContain('prediccion');
+      expect(texto).not.toContain('predicción');
+      expect(texto).not.toContain('confianza');
     });
   });
 });

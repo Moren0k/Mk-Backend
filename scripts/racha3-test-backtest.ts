@@ -36,20 +36,54 @@
  *    `bloqueada_por_operacion_previa`. Este backtest NO las recupera: las
  *    excluye, igual que el motor y que el proveedor de evidencia. Son 50 de
  *    4.102 filas; el sesgo existe y es conocido, no se estima.
- * 2. El umbral (86,87) se derivó del MISMO histórico sobre el que se mide.
- *    Eso es fuga de información a nivel de diseño, y ninguna de las dos
- *    evaluaciones la corrige. Es la razón por la que este umbral se
- *    documenta como experimental inicial y no como un valor validado.
- * 3. La tasa histórica no es una probabilidad de la próxima jugada. Estos
+ * 2. Sólo se evalúa la estimación DIRECTA. El sistema en vivo exige además
+ *    que la estimación por modelo supere el umbral, así que estos números
+ *    son OPTIMISTAS: cuentan como TOMAR oportunidades que en vivo se
+ *    descartarían.
+ * 3. El peaje de empates se mide sobre TODAS las operaciones, no
+ *    walk-forward. Es un coste estructural que varía poco, pero significa
+ *    que el umbral de las primeras oportunidades usa información posterior.
+ * 4. La tasa histórica no es una probabilidad de la próxima jugada. Estos
  *    números describen lo que ya pasó.
  */
 import { PrismaClient } from '@prisma/client';
 
+import { calcularEquilibrio } from '../src/core/racha3-test/equilibrio';
 import { intervaloWilson } from '../src/core/racha3-test/wilson';
 
 /** Los mismos defaults que `configuration.ts`. */
-const UMBRAL = Number.parseFloat(process.env.RACHA3_TEST_SCORE_THRESHOLD ?? '86.87');
-const MUESTRA_MINIMA = Number.parseInt(process.env.RACHA3_TEST_MIN_MUESTRA ?? '500', 10);
+const MUESTRA_MINIMA = Number.parseInt(
+  process.env.RACHA3_TEST_MIN_MUESTRA ?? '500',
+  10,
+);
+const UMBRAL_MINIMO = Number.parseFloat(
+  process.env.RACHA3_TEST_UMBRAL_MINIMO ?? '0',
+);
+const ESCALERA = (process.env.RACHA3_TEST_ESCALERA ?? '1,2,4')
+  .split(',')
+  .map((x) => Number.parseFloat(x.trim()));
+const DEVOLUCION_TIE = Number.parseFloat(
+  process.env.RACHA3_TEST_DEVOLUCION_TIE ?? '0.9',
+);
+
+/**
+ * Umbral = PUNTO DE EQUILIBRIO, con el peaje de empates medido de la base.
+ *
+ * Se rellena en `main()` antes de evaluar nada. Hasta entonces vale el
+ * equilibrio sin empates, que es el menos exigente — nunca un valor
+ * inventado.
+ *
+ * LIMITACIÓN respecto del sistema en vivo: este backtest evalúa SOLO la
+ * estimación directa. El sistema exige además que la estimación por modelo
+ * (la ventaja del lado sobre `jugadas`) supere el umbral, así que estos
+ * resultados son OPTIMISTAS: toman oportunidades que en vivo se
+ * descartarían. Reproducir la del modelo exigiría recorrer `jugadas` en
+ * orden temporal, y este script trabaja sobre operaciones.
+ */
+let UMBRAL =
+  100 *
+  (ESCALERA.reduce((a, b) => a + b, 0) /
+    (ESCALERA.reduce((a, b) => a + b, 0) + 1));
 
 type Resultado = 'DIRECTA' | 'MG1' | 'MG2' | 'LOSS';
 
@@ -159,17 +193,23 @@ function lineaGrupo(etiqueta: string, g: Grupo): string {
   );
 }
 
-const BUCKETS_SCORE = [
+/**
+ * Se construyen bajo demanda, no como constante de módulo: `UMBRAL` se
+ * calcula en `main()` desde el peaje medido, así que una lista evaluada al
+ * cargar el archivo se quedaría con el valor provisional.
+ */
+const bucketsScore = () => [
   { hasta: 80, etiqueta: '< 80' },
   { hasta: 84, etiqueta: '80 – 84' },
   { hasta: 86, etiqueta: '84 – 86' },
-  { hasta: UMBRAL, etiqueta: `86 – ${UMBRAL}` },
-  { hasta: 88, etiqueta: `${UMBRAL} – 88` },
+  { hasta: UMBRAL, etiqueta: `86 – ${UMBRAL.toFixed(2)}` },
+  { hasta: 88, etiqueta: `${UMBRAL.toFixed(2)} – 88` },
   { hasta: 90, etiqueta: '88 – 90' },
   { hasta: Infinity, etiqueta: '>= 90' },
 ];
 
 function distribucionScore(decisiones: readonly Decision[]): string[] {
+  const BUCKETS_SCORE = bucketsScore();
   const cuentas = BUCKETS_SCORE.map(() => 0);
   let sinScore = 0;
 
@@ -237,7 +277,7 @@ function informe(titulo: string, decisiones: readonly Decision[]): void {
     `  NO TOMAR                     ${descartadas.length}  (${((100 * descartadas.length) / decisiones.length).toFixed(2)}%)`,
   );
   console.log(`    · por muestra insuficiente ${porMuestra.length}  (gate MUESTRA_INSUFICIENTE, muestra < ${MUESTRA_MINIMA})`);
-  console.log(`    · por score bajo umbral    ${porScore.length}  (gate SCORE_BAJO_UMBRAL, score < ${UMBRAL})`);
+  console.log(`    · por score bajo umbral    ${porScore.length}  (gate SCORE_BAJO_UMBRAL, score < ${UMBRAL.toFixed(3)})`);
   console.log(`  errores de Analytics         0  (backtest offline: no aplica, ver nota)`);
   console.log(
     `  score promedio               ${promedio === null ? 'n/d' : promedio.toFixed(2)}` +
@@ -321,6 +361,17 @@ async function main(): Promise<void> {
       integridadOk: f.integridad_ok,
     }));
 
+    // Peaje de empates MEDIDO, y con él el punto de equilibrio.
+    const ties = await prisma.$queryRawUnsafe<
+      { nivel: number; ties: bigint; operaciones: bigint }[]
+    >('SELECT nivel, ties, operaciones FROM racha3_ties_por_nivel()');
+    const equilibrio = calcularEquilibrio(
+      { escalera: ESCALERA, devolucionTie: DEVOLUCION_TIE, pagoAcierto: 1 },
+      ties.map((t) => ({ nivel: Number(t.nivel), ties: Number(t.ties) })),
+      Number(ties[0]?.operaciones ?? 0),
+    );
+    UMBRAL = Math.max(UMBRAL_MINIMO, 100 * equilibrio.umbral);
+
     if (oportunidades.length === 0) {
       console.log('No hay oportunidades resueltas en las tablas derivadas.');
       return;
@@ -328,7 +379,11 @@ async function main(): Promise<void> {
 
     console.log('BACKTEST — Racha 3 Test');
     console.log(
-      `umbral=${UMBRAL}  muestraMinima=${MUESTRA_MINIMA}  ` +
+      `umbral=${UMBRAL.toFixed(3)} (punto de equilibrio)  ` +
+        `escalera=[${ESCALERA.join(',')}] devolucionTie=${DEVOLUCION_TIE} ` +
+        `peajeEmpates=${equilibrio.peajeTiePorOperacion.toFixed(5)} u/op ` +
+        `(sin empates seria ${(100 * equilibrio.umbralSinTie).toFixed(3)})\n` +
+        `muestraMinima=${MUESTRA_MINIMA}  ` +
         `condición del score = tipo_racha`,
     );
     console.log(
@@ -423,9 +478,18 @@ async function main(): Promise<void> {
       '    Analytics produce NO TOMAR (gate ANALYTICS_SIN_EVIDENCIA).',
     );
     console.log(
-      '  · El umbral se derivó de este mismo histórico. Ninguna de las dos',
+      '  · El umbral es el PUNTO DE EQUILIBRIO: sale de la estructura de pago,',
     );
-    console.log('    evaluaciones corrige esa fuga de diseño.');
+    console.log(
+      '    no del historial de aciertos. Lo unico que toma de los datos es el',
+    );
+    console.log('    peaje de los empates, que es un coste, no un resultado.');
+    console.log(
+      '  · Solo se evalua la estimacion DIRECTA. En vivo se exige tambien la',
+    );
+    console.log(
+      '    del modelo, asi que el TOMAR real seria aun menor que el de aqui.',
+    );
     console.log(
       `  · Se excluyen las oportunidades con bloqueada_por_operacion_previa;`,
     );

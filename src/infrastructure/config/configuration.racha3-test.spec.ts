@@ -13,7 +13,10 @@ describe('configuration() — bloque racha3Test', () => {
   beforeEach(() => {
     process.env = { ...original };
     delete process.env.RACHA3_TEST_ENABLED;
-    delete process.env.RACHA3_TEST_SCORE_THRESHOLD;
+    delete process.env.RACHA3_TEST_UMBRAL_MINIMO;
+    delete process.env.RACHA3_TEST_ESCALERA;
+    delete process.env.RACHA3_TEST_DEVOLUCION_TIE;
+    delete process.env.RACHA3_TEST_PAGO_ACIERTO;
     delete process.env.RACHA3_TEST_MIN_MUESTRA;
     delete process.env.RACHA3_TEST_MAX_REZAGO;
     delete process.env.RACHA3_TEST_TELEGRAM_BOT_TOKEN;
@@ -28,7 +31,12 @@ describe('configuration() — bloque racha3Test', () => {
     const { racha3Test } = configuration();
 
     expect(racha3Test.enabled).toBe(false);
-    expect(racha3Test.umbralScore).toBe(86.87);
+    // El umbral no se escribe a mano: sale del punto de equilibrio. Este
+    // parametro es solo un piso, y 0 significa 'manda el equilibrio'.
+    expect(racha3Test.umbralMinimo).toBe(0);
+    expect(racha3Test.escalera).toEqual([1, 2, 4]);
+    expect(racha3Test.devolucionTie).toBe(0.9);
+    expect(racha3Test.pagoAcierto).toBe(1);
     expect(racha3Test.muestraMinima).toBe(500);
     expect(racha3Test.maxRezagoJugadas).toBe(50);
   });
@@ -44,13 +52,17 @@ describe('configuration() — bloque racha3Test', () => {
   });
 
   it('respeta los valores explícitos', () => {
-    process.env.RACHA3_TEST_SCORE_THRESHOLD = '90.5';
+    process.env.RACHA3_TEST_UMBRAL_MINIMO = '90.5';
+    process.env.RACHA3_TEST_ESCALERA = '1,3,9';
+    process.env.RACHA3_TEST_DEVOLUCION_TIE = '1';
     process.env.RACHA3_TEST_MIN_MUESTRA = '1200';
     process.env.RACHA3_TEST_MAX_REZAGO = '10';
 
     const { racha3Test } = configuration();
 
-    expect(racha3Test.umbralScore).toBe(90.5);
+    expect(racha3Test.umbralMinimo).toBe(90.5);
+    expect(racha3Test.escalera).toEqual([1, 3, 9]);
+    expect(racha3Test.devolucionTie).toBe(1);
     expect(racha3Test.muestraMinima).toBe(1200);
     expect(racha3Test.maxRezagoJugadas).toBe(10);
   });

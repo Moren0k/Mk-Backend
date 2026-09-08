@@ -32,24 +32,47 @@ function game(letra: string): Game {
   };
 }
 
-/** Evidencia de PLAYER con score 87.83 (sobre el umbral 86.87). */
+/**
+ * Distribución real de `jugadas`. Con tres intentos la estimación por
+ * modelo da 87,53, así que con `devolucionTie: 1` (umbral 87,50) el caso
+ * bueno TOMA y con 0,9 (umbral 87,95) no.
+ */
+const LADOS = {
+  total: 44139,
+  banker: 19733,
+  player: 19312,
+  tie: 5094,
+  noTie: 39045,
+  corteId: 44718,
+};
+
+const TIES = [
+  { nivel: 0, ties: 269 },
+  { nivel: 1, ties: 126 },
+  { nivel: 2, ties: 57 },
+];
+
+/** Evidencia de PLAYER: directa 88.01, modelo 87.53 → score 87.53. */
 const EVIDENCIA_BUENA = {
   evidencia: {
     condicion: 'tipo_racha=PLAYER',
     tipoRacha: WinnerType.PLAYER,
-    aciertos: 1802,
-    resueltas: 2019,
-    directa: 1048,
-    mg1: 483,
-    mg2: 271,
-    perdidas: 217,
-    muestraN: 2019,
+    aciertos: 1873,
+    resueltas: 2095,
+    directa: 1089,
+    mg1: 502,
+    mg2: 282,
+    perdidas: 222,
+    muestraN: 2095,
     advertenciaMuestra: null,
     muestraBloqueadasExcluidas: 25,
     muestraIntegridadDudosa: 0,
     ventanaDesde: null,
     ventanaHasta: null,
   },
+  lados: LADOS,
+  tiesPorNivel: TIES,
+  operacionesMedidas: 2095,
   contexto: {
     horaColombia: 10,
     diaSemana: 2,
@@ -69,7 +92,7 @@ const EVIDENCIA_BUENA = {
   },
 };
 
-/** Evidencia de BANKER con score 85.04 (bajo el umbral). */
+/** Evidencia de BANKER: apuesta al lado malo, las dos estimaciones bajas. */
 const EVIDENCIA_BAJA = {
   ...EVIDENCIA_BUENA,
   evidencia: {
@@ -114,6 +137,7 @@ function montar(
   opciones: {
     enabled?: boolean;
     umbral?: number;
+    devolucionTie?: number;
     bus?: InMemoryDomainEventBus;
   } = {},
 ): Contexto {
@@ -135,9 +159,17 @@ function montar(
   const config = {
     get: jest.fn((clave: string, def?: unknown) => {
       if (clave === 'racha3Test.enabled') return opciones.enabled ?? true;
-      if (clave === 'racha3Test.umbralScore') return opciones.umbral ?? 86.87;
+      if (clave === 'racha3Test.umbralMinimo') return opciones.umbral ?? 0;
       if (clave === 'racha3Test.muestraMinima') return 500;
       if (clave === 'racha3Test.maxRezagoJugadas') return 50;
+      if (clave === 'racha3Test.escalera') return [1, 2, 4];
+      // Devolución del 100 % en las pruebas del coordinator: deja el umbral
+      // en 87,50 y permite ejercitar el camino TOMAR. El efecto del peaje
+      // real (que hoy lleva a NO TOMAR) se prueba en la calculadora, que es
+      // donde vive esa aritmética.
+      if (clave === 'racha3Test.devolucionTie')
+        return opciones.devolucionTie ?? 1;
+      if (clave === 'racha3Test.pagoAcierto') return 1;
       return def;
     }),
   } as unknown as ConfigService;
@@ -366,6 +398,9 @@ describe('Racha3TestCoordinator', () => {
       const c = montar();
       c.provider.recolectar.mockResolvedValue({
         evidencia: null,
+        lados: null,
+        tiesPorNivel: [],
+        operacionesMedidas: 0,
         contexto: EVIDENCIA_BUENA.contexto,
         estadoAnalytics: {
           disponible: false,
@@ -433,6 +468,7 @@ describe('Racha3TestCoordinator', () => {
       expect(ev.score.traza.length).toBeGreaterThan(5);
       expect(ev.score.componentes.contexto.peso).toBe(0);
       expect(ev.score.componentes.contexto.horaColombia).toBe(10);
+      expect(ev.score.economia.perdidaPorFallo).toBe(7);
       expect(ev.estadoAnalytics.jugadasSinProcesar).toBe(1);
     });
 
@@ -442,13 +478,15 @@ describe('Racha3TestCoordinator', () => {
       await alimentar(c, 'BPPP');
 
       const s = c.notifier.notificarEvaluacion.mock.calls[0][0].score;
-      expect(s.score).toBe(87.83);
-      expect(s.componentes.historico.aciertos).toBe(1802);
-      expect(s.componentes.historico.resueltas).toBe(2019);
+      expect(s.score).toBe(87.53);
+      expect(s.componentes.historico.aciertos).toBe(1873);
+      expect(s.componentes.historico.resueltas).toBe(2095);
       expect(100 * (s.componentes.intervalo?.limiteInferior ?? 0)).toBeCloseTo(
-        87.83,
+        88.01,
         2,
       );
+      expect(s.scoreDirecto).toBe(88.01);
+      expect(s.scoreModelo).toBe(87.53);
     });
   });
 
@@ -480,14 +518,21 @@ describe('Racha3TestCoordinator', () => {
       expect(señal).toMatch(/horaColombia=\d+/);
 
       // El score trae la cadena verificable a mano: conteos → tasa → IC.
-      expect(score).toContain('score=87.83');
-      expect(score).toContain('umbral=86.87');
+      expect(score).toContain('score=87.53');
+      expect(score).toContain('umbral=87.5');
       expect(score).toContain('nivel=SOBRE_UMBRAL');
-      expect(score).toContain('muestraN=2019');
-      expect(score).toMatch(/tasaObservada=0\.892\d+/);
+      expect(score).toContain('muestraN=2095');
+      expect(score).toMatch(/tasaObservada=0\.894\d+/);
       // 0,878258 → ×100 → 87,8258 → redondeado a 87,83. La cadena queda
       // verificable a mano desde el log.
-      expect(score).toMatch(/icInferior=0\.87825\d/);
+      // 0,880124 → ×100 → 88,0124 → estimación directa 88,01. El score que
+      // decide es el mínimo con la del modelo (87,53), y la línea trae los
+      // dos para poder rehacer la cuenta a mano.
+      expect(score).toMatch(/icInferior=0\.88012\d/);
+      expect(score).toContain('directo=88.01');
+      expect(score).toContain('modelo=87.53');
+      expect(score).toMatch(/ev=[-0-9.]+/);
+      expect(score).toMatch(/peajeTie=[0-9.]+/);
       expect(score).toContain('rezago=1');
 
       expect(decision).toContain('decision=TOMAR');
@@ -508,7 +553,7 @@ describe('Racha3TestCoordinator', () => {
       expect(resuelta).toContain('resultado=DIRECTA');
       expect(resuelta).toContain('jugadas=1');
       expect(resuelta).toContain('ties=0');
-      expect(resuelta).toContain('score=87.83');
+      expect(resuelta).toContain('score=87.53');
     });
 
     it('un NO TOMAR nombra el gate que lo descartó', async () => {

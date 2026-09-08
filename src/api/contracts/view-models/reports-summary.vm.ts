@@ -16,9 +16,27 @@ export type ReportsChannelSummaryVm = {
   readonly won: number;
   readonly lost: number;
   readonly alertsSent: number;
-  /** `won - lost * 7`: unidades reales de ganancia/pérdida (progresión de
-   *  martingala 1+2+4 — una pérdida cuesta las 7 unidades de la
-   *  progresión completa, una victoria siempre deja 1 unidad neta). */
+  /**
+   * `won - lost * 7`: progresión de martingala 1+2+4 — una pérdida cuesta
+   * las 7 unidades de la progresión completa, una victoria siempre deja 1
+   * unidad neta.
+   *
+   * ATENCIÓN: **SOBREESTIMA**, y no por poco. No descuenta el peaje de los
+   * empates. Un empate no cierra la operación y no consume gale, pero la
+   * mesa devuelve el 90 % de lo apostado, así que cuesta el 10 % del
+   * importe del nivel donde cae — y el importe se duplica en cada nivel.
+   * Medido sobre el histórico de Analytics: 0,0386 unidades por operación,
+   * lo que sobre 4.218 operaciones convierte un `netUnits` reportado de
+   * +162 en **−0,9 reales**.
+   *
+   * Corregirlo exige que `Operation` cuente los empates POR NIVEL (hoy solo
+   * reporta `tieOccurred` por jugada, sin recordar dónde ocurrió),
+   * propagarlo por `OperationSnapshot` y `OperationClosedRecord`, y añadir
+   * la columna correspondiente a `report_checkpoints` para que el acumulado
+   * sobreviva a un reinicio. Queda como trabajo separado; el cálculo de
+   * referencia está en `core/racha3-test/equilibrio.ts` y las funciones SQL
+   * que lo miden en `racha3_ties_por_nivel()` (ver ANALYTICS.md).
+   */
   readonly netUnits: number;
 };
 

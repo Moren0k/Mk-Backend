@@ -137,6 +137,17 @@ async function verificarAgregaciones(
              COALESCE((SELECT max(k) FROM s), 0), (SELECT m FROM cola), 1)) d
      ORDER BY d`);
 
+  // Capa de economía: los dos insumos que convierten una tasa histórica en
+  // una decisión (`20260909010000_analytics_racha3_economia`).
+  const lados = await uno<Record<string, unknown>>(
+    'SELECT * FROM racha3_lados_jugadas()',
+  );
+  const economia = await uno<Record<string, unknown>>(`
+    SELECT (SELECT sum(ties) FROM racha3_ties_por_nivel())      AS ties_por_nivel,
+           (SELECT sum(ties_en_operacion) FROM racha3_operaciones
+             WHERE estado = 'RESUELTA'
+               AND NOT bloqueada_por_operacion_previa)          AS ties_declarados`);
+
   // Total de tiempo en riesgo observado, y de dónde puede salir: la suma de
   // los largos de los intervalos más la cola acotada. Es una identidad
   // exacta, y es la que delata si el hazard vuelve a contar jugadas que
@@ -247,6 +258,26 @@ async function verificarAgregaciones(
       detalle:
         `casos=${suma(hz, 'casos_observados')} = intervalos=${n(horizonte.suma_intervalos)}` +
         ` + cola=${n(horizonte.cola_acotada)}; ${n(horizonte.sin_procesar)} jugadas sin procesar quedan fuera`,
+    },
+    {
+      // La descomposición de empates por nivel es la base del peaje que
+      // mueve el punto de equilibrio, así que tiene que reproducir
+      // exactamente el total que ya declara la tabla. Un COALESCE de más en
+      // la cota superior contaría los empates de todo el historial: es el
+      // mismo error que infló el hazard (ver 20260908050000).
+      nombre: 'los empates por nivel de la escalera suman ties_en_operacion',
+      ok:
+        n(economia.ties_por_nivel) === n(economia.ties_declarados) &&
+        n(economia.ties_por_nivel) > 0,
+      detalle: `por nivel=${n(economia.ties_por_nivel)} declarado=${n(economia.ties_declarados)}`,
+    },
+    {
+      nombre: 'la distribución de lados cuadra y se acota al checkpoint',
+      ok:
+        n(lados.banker) + n(lados.player) + n(lados.tie) === n(lados.total) &&
+        n(lados.banker) + n(lados.player) === n(lados.no_tie) &&
+        n(lados.corte_id) >= n(lados.total),
+      detalle: `total=${n(lados.total)} no_tie=${n(lados.no_tie)} corte=${n(lados.corte_id)}`,
     },
     {
       nombre: 'los intervalos entre pérdidas son (#LOSS - 1)',

@@ -71,6 +71,32 @@ export type Racha3TestContexto = {
   readonly columnaConCortePorGap: boolean | null;
 };
 
+/**
+ * Distribución de ganadores sobre `jugadas`, de `racha3_lados_jugadas()`.
+ *
+ * Es la SEGUNDA fuente de evidencia, y la más potente: ~39.000 jugadas
+ * no-empate contra ~4.200 oportunidades resueltas, nueve veces más muestra
+ * sobre la misma pregunta. Permite estimar la tasa de la escalera desde la
+ * ventaja del lado que se va a apostar, en vez de contar victorias de
+ * operaciones completas.
+ *
+ * El precio es un supuesto: que las rondas son independientes. Sobre este
+ * histórico está bien respaldado — `P(la columna sigue | llegó a k)` es
+ * plana en 0,44 para k=1..6, y los intervalos entre pérdidas son
+ * geométricos (χ²=3,70 contra un crítico de 9,49). Aun así es un supuesto,
+ * y por eso esta estimación no sustituye a la directa: se exige que las DOS
+ * superen el umbral.
+ */
+export type Racha3TestLados = {
+  readonly total: number;
+  readonly banker: number;
+  readonly player: number;
+  readonly tie: number;
+  readonly noTie: number;
+  /** Hasta qué `jugadas.id` se contó: el checkpoint de Analytics. */
+  readonly corteId: number;
+};
+
 /** Estado del pipeline derivado en el momento de la evaluación. */
 export type Racha3TestEstadoAnalytics = {
   readonly disponible: boolean;
@@ -85,6 +111,13 @@ export type Racha3TestGate =
   | 'ANALYTICS_REZAGADO'
   | 'MUESTRA_INSUFICIENTE'
   | 'OPERACION_VIRTUAL_ABIERTA'
+  /** Faltan los conteos de `jugadas` para la segunda estimación. */
+  | 'MODELO_SIN_EVIDENCIA'
+  /**
+   * El score que decide (el MENOR de las dos estimaciones) no alcanza el
+   * punto de equilibrio. Se exige que las dos lo superen, así que este gate
+   * dispara si falla cualquiera.
+   */
   | 'SCORE_BAJO_UMBRAL';
 
 export type Racha3TestGateEvaluado = {
@@ -110,11 +143,48 @@ export type Racha3TestNivel =
  * es un número que hay que creer.
  */
 export type Racha3TestScore = {
-  /** `null` cuando no hubo evidencia con la que calcular nada. */
+  /**
+   * El score que DECIDE: el menor de las dos estimaciones. Exigir que las
+   * dos superen el umbral es lo mismo que exigirlo del mínimo, y así queda
+   * un único número comparable en el mensaje y en el log.
+   *
+   * `null` cuando no hubo evidencia con la que calcular nada.
+   */
   readonly score: number | null;
+  /**
+   * Estimación DIRECTA: límite inferior del IC95 de aciertos/resueltas
+   * sobre las oportunidades ya resueltas de esta condición. No supone nada
+   * sobre el proceso, pero tiene ~9× menos muestra.
+   */
+  readonly scoreDirecto: number | null;
+  /**
+   * Estimación por MODELO: se estima la ventaja del lado apostado sobre
+   * `jugadas` y se propaga por `1 − (1−ω)^intentos`. Mucha más muestra, a
+   * cambio de suponer rondas independientes.
+   */
+  readonly scoreModelo: number | null;
+  /** Punto de equilibrio calculado, en la misma escala que el score. */
   readonly umbral: number;
   readonly nivel: Racha3TestNivel;
   readonly tomar: boolean;
+
+  /**
+   * Aritmética de la apuesta. Es lo que convierte el umbral en algo
+   * interpretable: si `evEstimado` es negativo, la apuesta pierde dinero
+   * por muy alta que parezca la tasa.
+   */
+  readonly economia: {
+    readonly perdidaPorFallo: number;
+    readonly gananciaPorAcierto: number;
+    readonly devolucionTie: number;
+    readonly peajeTiePorOperacion: number;
+    readonly umbralSinTie: number;
+    /** Unidades esperadas por operación con el score que decide. */
+    readonly evEstimado: number | null;
+    /** Ventaja por unidad apostada del lado que se va a apostar. */
+    readonly ventajaPorUnidad: number | null;
+    readonly traza: readonly string[];
+  };
 
   readonly componentes: {
     /** Tasa observada y sus conteos. */
@@ -129,8 +199,24 @@ export type Racha3TestScore = {
       readonly minimoRequerido: number;
       readonly suficiente: boolean;
     };
-    /** El intervalo del que sale el score. */
+    /** El intervalo del que sale la estimación directa. */
     readonly intervalo: IntervaloWilson | null;
+    /**
+     * La estimación por modelo, con la cadena a la vista: la ventaja del
+     * lado apostado, su intervalo, y la tasa de escalera que implica.
+     */
+    readonly modelo: {
+      readonly lado: WinnerType;
+      readonly gana: number;
+      readonly pierde: number;
+      readonly empata: number;
+      /** Ventaja del lado condicionada a que la ronda no sea empate. */
+      readonly omega: number;
+      readonly intervaloOmega: IntervaloWilson;
+      readonly intentos: number;
+      readonly tasaEsperada: number;
+      readonly tasaLimiteInferior: number;
+    } | null;
     /** Rasgos con peso 0, explícito. */
     readonly contexto: Racha3TestContexto & { readonly peso: 0 };
   };
@@ -153,9 +239,21 @@ export type Racha3TestScore = {
 
 /** Parámetros del cálculo. Todo configurable, nada hardcodeado en la fórmula. */
 export type Racha3TestParametros = {
-  readonly umbralScore: number;
+  /**
+   * Umbral MÍNIMO exigido, en la escala del score. El umbral efectivo es el
+   * mayor entre éste y el punto de equilibrio calculado: el equilibrio es
+   * la condición para no perder dinero, y este parámetro permite ser aún
+   * más exigente, nunca menos.
+   */
+  readonly umbralMinimo: number;
   readonly muestraMinima: number;
   readonly maxRezagoJugadas: number;
+  /** Importe por nivel de la escalera. Define la pérdida y los intentos. */
+  readonly escalera: readonly number[];
+  /** Fracción que devuelve un empate. 0,90 = devuelve el 90 %. */
+  readonly devolucionTie: number;
+  /** Ganancia neta de un acierto. 1 = pago 1:1. */
+  readonly pagoAcierto: number;
 };
 
 /**
