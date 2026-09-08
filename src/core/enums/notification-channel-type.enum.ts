@@ -10,4 +10,12 @@
 export enum NotificationChannelType {
   TELEGRAM = 'TELEGRAM',
   TELEGRAM_PRUEBAS = 'TELEGRAM_PRUEBAS',
+  /**
+   * Canal dedicado al DEBUG de la estrategia experimental Racha 3 Test.
+   * Tercera instancia de TelegramChannel, deliberadamente FUERA del token
+   * NOTIFICATION_CHANNELS: si estuviera ahí, NotificationCoordinator le
+   * enviaría también las alertas reales de producción (ver
+   * `application/racha3-test/racha3-test.module.ts`).
+   */
+  TELEGRAM_RACHA3_TEST = 'TELEGRAM_RACHA3_TEST',
 }

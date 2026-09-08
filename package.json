@@ -28,7 +28,8 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "analytics:verify": "ts-node --transpile-only -P tsconfig.json scripts/analytics-verify.ts",
-    "analytics:rebuild": "ts-node --transpile-only -P tsconfig.json scripts/analytics-rebuild.ts"
+    "analytics:rebuild": "ts-node --transpile-only -P tsconfig.json scripts/analytics-rebuild.ts",
+    "racha3-test:backtest": "ts-node --transpile-only -P tsconfig.json scripts/racha3-test-backtest.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

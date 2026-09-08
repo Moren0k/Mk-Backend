@@ -16,3 +16,4 @@ export const OPERATION_REPORT_STORE = Symbol('OperationReportStore');
 export const REPORT_CHECKPOINT_STORE = Symbol('ReportCheckpointStore');
 export const RACHA3_PROCESSOR = Symbol('Racha3Processor');
 export const RACHA3_ANALYTICS_READER = Symbol('Racha3AnalyticsReader');
+export const RACHA3_TEST_DEBUG_CHANNEL = Symbol('Racha3TestDebugChannel');

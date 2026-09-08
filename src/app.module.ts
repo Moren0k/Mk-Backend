@@ -13,6 +13,7 @@ import { StatisticsModule } from './application/statistics/statistics.module';
 import { ObservabilityModule } from './application/observability/observability.module';
 import { ReportingModule } from './application/reporting/reporting.module';
 import { AnalyticsModule } from './application/analytics/analytics.module';
+import { Racha3TestModule } from './application/racha3-test/racha3-test.module';
 import { PersistenceModule } from './infrastructure/persistence/persistence.module';
 
 /**
@@ -72,6 +73,13 @@ import { PersistenceModule } from './infrastructure/persistence/persistence.modu
     // del sistema es la conexión a Postgres. Si falla o queda deshabilitado,
     // la detección de rachas y el envío de alertas no se ven afectados.
     AnalyticsModule,
+    // Estrategia EXPERIMENTAL "Racha 3 Test" (ver RACHA3-TEST.md). Arranca
+    // apagada (RACHA3_TEST_ENABLED). No se registra en el token STRATEGIES,
+    // así que OperationCoordinator nunca ve una señal suya y nunca crea una
+    // operación real; sus mensajes van a un canal de Telegram propio que
+    // está fuera de NOTIFICATION_CHANNELS. La estrategia `streak-3` de
+    // producción no se ve afectada de ninguna forma.
+    Racha3TestModule,
     PersistenceModule,
     ApiModule,
   ],
