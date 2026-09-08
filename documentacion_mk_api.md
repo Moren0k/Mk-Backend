@@ -1,6 +1,6 @@
 # documentacion_mk_api.md — Guía de consumo de la API (`src/api/`)
 
-> Este documento es la referencia **de consumo**: qué endpoint llamar, qué mandarle, qué te devuelve y por qué. Para el razonamiento arquitectónico (por qué existe cada pieza, decisiones de negocio, alternativas descartadas) ver [`Mk-Api.md`](./Mk-Api.md) — este archivo resume su implementación real, ya construida y verificada en el repo (F1-F5 completos; F6 fuera de alcance, F8/F9 sin código nuevo).
+> Este documento es la referencia **de consumo**: qué endpoint llamar, qué mandarle, qué te devuelve y por qué. Para el razonamiento arquitectónico (por qué existe cada pieza, decisiones de negocio, alternativas descartadas) ver [`Mk-Api.md`](./Mk-Api.md) — este archivo resume su implementación real, ya construida y verificada en el repo (F1-F5 completos; F8/F9 sin código nuevo). La F6 de aquel plan era `GET /api/v1/results`, un listado crudo y paginado de `jugadas`: **sigue sin existir y ya no se planea**, porque la necesidad real resultó ser evidencia estadística agregada y eso lo cubre el recurso `analytics/racha3` (§4.13, `Mk-Api.md` ADR-13).
 
 ---
 
@@ -11,6 +11,7 @@
 - **CORS:** abierto a cualquier origen mientras el proyecto está en desarrollo (`app.enableCors({ origin: true, ... })` en `main.ts`) — un frontend en otro dominio/puerto puede llamar directo desde el navegador sin configuración adicional. Se va a restringir a una allowlist de dominios antes de producción.
 - **Formato de respuesta:** siempre JSON, siempre el mismo sobre (`{ data, meta?, requestId }` o `{ error }`) — ver §2.
 - **Nada de esto habla con Tipminer/Telegram/Prisma directo**: todo pasa por casos de uso ya existentes en `application/`.
+- **Analytics histórico:** `GET /api/v1/analytics/racha3/*` (§4.13) expone evidencia estadística sobre las ~42.500 jugadas persistidas. Es el único recurso que **depende de la base de datos**: sin `DATABASE_URL` responde `503`. Tres reglas antes de consumirlo — no predice nada, `frecuencia_historica` y `tasa_empirica_condicionada` no son comparables, y las tasas son **fracciones** en [0,1], no porcentajes. Ver §4.13.
 - **⚠️ El motor arranca completamente apagado:** las 2 estrategias existen en código (`streak-3`, `streak-4` — ver `GET /api/v1/strategies`, §4.11) pero **ninguna corre** hasta que se le asigne un canal y ese canal se active vía `PATCH /api/v1/channels/:channel` (§4.7). Un reinicio del proceso vuelve a apagar todo (no hay persistencia de esta configuración) — hay que reconfigurar los canales cada vez que el proceso arranca.
 - **Un canal, como máximo una estrategia:** el registro lo garantiza — asignar una estrategia distinta a un canal ya ocupado expulsa automáticamente a la anterior (ver §4.7).
 
@@ -487,6 +488,330 @@ Segundo (y único otro) endpoint público junto a `GET /api/v1/health`: no requi
 
 ---
 
+
+### 4.13 `GET /api/v1/analytics/racha3/*` — Analytics histórico (8 GET + 1 POST)
+
+Evidencia histórica sobre la estrategia Racha 3, calculada sobre las ~42.500 jugadas persistidas. Referencia completa del dominio en [`ANALYTICS.md`](./ANALYTICS.md); decisiones de diseño en `Mk-Api.md` ADR-13.
+
+#### Antes de consumir estos endpoints: tres reglas del contrato
+
+**1. Analytics no predice ni decide alertas.** Describe lo que ya ocurrió. Ningún campo se llama `probabilidad`, `prediccion` ni `confianza`, y eso es deliberado: convertir una frecuencia histórica en probabilidad predictiva exige supuestos que estos datos no contienen. La decisión de alertar la mantiene el Core.
+
+**2. `frecuencia_historica` y `tasa_empirica_condicionada` son magnitudes distintas y NO comparables.**
+
+| Campo | Qué es | Suma 1 |
+|---|---|---|
+| `frecuencia_historica` | Proporción de los casos observados que cayeron en esa categoría | **Sí** |
+| `tasa_empirica_condicionada` | Proporción de veces que ocurrió el evento entre los casos que llegaron a estar **en riesgo** (hazard empírico) | **No** |
+
+Sobre el histórico actual llegan a ordenar los buckets al revés: `0-5` es el segundo bucket más frecuente (0,25) y a la vez el de **menor** tasa condicionada (0,053). Leer uno creyendo estar leyendo el otro es el error más fácil de cometer con esta API.
+
+**3. Las tasas son FRACCIONES en [0,1], nunca porcentajes.** Toda respuesta que lleva tasas lo declara en `unidad_tasas: "fraccion_0_1"`. Multiplicá por 100 sólo al presentar. Junto a cada proporción va su conteo crudo, para que puedas recomputarla.
+
+Y una regla de lectura: **toda tasa viene con su `muestra_n`**. Con ~170 observaciones por hora, una diferencia de varios puntos entre dos horas es compatible con el azar. Cuando `muestra_n` está por debajo del umbral, la respuesta trae `advertencia_muestra` no nula.
+
+#### Parámetros comunes a los 8 GET
+
+| Parámetro | Tipo | Default | Notas |
+|---|---|---|---|
+| `desde` | ISO-8601 | — | Inicio de la ventana sobre `confirmacion_en`, **inclusive** |
+| `hasta` | ISO-8601 | — | Fin, **exclusive**. La ventana es `[desde, hasta)` |
+| `tipo` | `PLAYER` \| `BANKER` | ambos | |
+| `incluir_bloqueadas` | `true` \| `false` | **`false`** | Oportunidades que el motor real no habría podido operar (había una operación abierta). Excluidas por defecto porque el consumidor natural es el Core |
+| `incluir_integridad_dudosa` | `true` \| `false` | **`true`** | Oportunidades con un hueco del historial en su ventana. Incluidas por defecto — son observaciones reales — pero su cantidad viaja siempre en `muestra_integridad_dudosa` |
+| `umbral_muestra` | entero 1–100000 | `100` | Bajo este `muestra_n` se emite `advertencia_muestra` |
+
+Los defaults son **asimétricos a propósito**: las bloqueadas se excluyen porque distorsionarían la lectura del Core; las de integridad dudosa se incluyen porque excluirlas por defecto sería descartar datos en silencio. En ambos casos la respuesta dice cuántas filas están involucradas.
+
+#### Validación
+
+Todo valor desconocido o mal formado devuelve **400 `VALIDATION_ERROR`**. No hay defaults silenciosos: un typo en `tipo=PLAYERR` que devolviera el total de ambos lados sería peor que un error.
+
+| Regla | Ejemplos rechazados |
+|---|---|
+| `tipo` ∈ {`PLAYER`,`BANKER`} | `PLAYERR`, `player`, `TIE` |
+| Booleanos: sólo `"true"`/`"false"` | `1`, `0`, `yes`, `TRUE`, `on` |
+| Fechas ISO-8601 parseables, `desde < hasta`, rango ≤ **366 días** | `ayer`, ventana invertida, extremos iguales, rango de 26 años |
+| `metrica` ∈ {`jugadas`,`columnas`,`segundos`} | `minutos` |
+| `entre` ∈ {`RACHA3`,`PERDIDAS`} | `perdidas` |
+| `cotas`: CSV de enteros, 1–12 valores, cada uno 1–1.000.000, **estrictamente creciente** | `10,5`, `5,5`, `5,a`, `0,5`, 13 valores, `99999999` |
+| `umbral_muestra` entero 1–100000 | `0` |
+| `maximo` entero 2–50 | `1`, `999` |
+
+`cotas` exige orden estricto porque con valores desordenados el etiquetado produciría buckets sin sentido (`"8-5"`) en vez de fallar, y recibirías una distribución incoherente en lugar de un error.
+
+Si la base de datos no está disponible, los endpoints responden **503 `UNAVAILABLE`** (a diferencia del scheduler interno, que en ese caso simplemente no procesa).
+
+---
+
+#### 4.13.1 `GET /api/v1/analytics/racha3/resumen`
+
+Frecuencia y resultado de operaciones. Una sola fila de datos.
+
+```json
+{
+  "data": {
+    "unidad_tasas": "fraccion_0_1",
+    "zona_horaria": "America/Bogota",
+    "ventana": { "desde": "2026-08-21T18:23:15.232Z", "hasta": "2026-09-08T01:47:47.859Z" },
+    "frecuencia": {
+      "total": 4069, "resueltas": 4069, "pendientes": 0,
+      "player": 2011, "banker": 2058,
+      "frecuencia_historica_player": 0.4942,
+      "frecuencia_historica_banker": 0.5058
+    },
+    "resultados": {
+      "directa": 2041, "mg1": 1011, "mg2": 522, "perdidas": 495,
+      "tasa_directa": 0.5017,
+      "tasa_mg1": 0.2485,
+      "tasa_mg2": 0.1284,
+      "tasa_perdida": 0.1199,
+      "tasa_acierto_total": 0.8801
+    },
+    "muestra_n": 4069,
+    "muestra_bloqueadas_excluidas": 50,
+    "muestra_integridad_dudosa": 10,
+    "advertencia_muestra": null
+  },
+  "requestId": "…"
+}
+```
+
+`muestra_n` = **las resueltas**, nunca el total: una operación todavía abierta no tiene resultado, y meterla en el denominador deprimiría artificialmente todas las tasas. `tasa_directa + tasa_mg1 + tasa_mg2 + tasa_perdida = 1`, y `tasa_acierto_total = 1 − tasa_perdida`.
+
+#### 4.13.2 `GET /api/v1/analytics/racha3/intervalos`
+
+Estadísticos de los intervalos entre Racha 3, en las **tres unidades a la vez**, más su distribución por buckets.
+
+Query propio: `entre` (`RACHA3` default \| `PERDIDAS`), `metrica` (`jugadas` default), `cotas`.
+
+```json
+{
+  "data": {
+    "entre": "RACHA3",
+    "metrica": "jugadas",
+    "cotas": [5, 10, 15, 20, 30, 50],
+    "intervalos": [
+      { "metrica": "columnas", "muestra_n": 4068, "minimo": 1, "p25": 2, "mediana": 5,
+        "p75": 8, "p90": 13, "p99": 26, "maximo": 57, "promedio": 6.26,
+        "desviacion": 6.41, "advertencia_muestra": null },
+      { "metrica": "jugadas",  "muestra_n": 4068, "minimo": 3, "p25": 5, "mediana": 8,
+        "p75": 13, "p90": 20, "p99": 37, "maximo": 74, "promedio": 10.45,
+        "desviacion": 8.02, "advertencia_muestra": null },
+      { "metrica": "segundos", "muestra_n": 4068, "minimo": 92, "p25": 190, "mediana": 290,
+        "p75": 452, "p90": 697, "p99": 1301.4, "maximo": 12518, "promedio": 366.86,
+        "desviacion": 340.1, "advertencia_muestra": null }
+    ],
+    "distribucion": [
+      { "bucket": "0-5",   "orden": 1, "n": 1034, "frecuencia_historica": 0.2542, "muestra_n": 4068, "metrica": "jugadas" },
+      { "bucket": "6-10",  "orden": 2, "n": 1551, "frecuencia_historica": 0.3813, "muestra_n": 4068, "metrica": "jugadas" },
+      { "bucket": "51+",   "orden": 7, "n": 8,    "frecuencia_historica": 0.002,  "muestra_n": 4068, "metrica": "jugadas" }
+    ]
+  },
+  "requestId": "…"
+}
+```
+
+Las tres unidades van juntas a propósito: mirar sólo una induce a conclusiones que la otra desmiente — un intervalo corto en jugadas puede ser largo en tiempo si hubo un hueco en el historial. Y la distribución acompaña a la mediana porque en una distribución con cola larga el valor típico no es representativo.
+
+Se devuelven **todos** los buckets, incluso los vacíos (`n: 0`): un bucket ausente se confunde con "no consultado".
+
+> **Es el endpoint más lento (~910 ms).** Deuda técnica conocida y aceptada: sus dos consultas recomputan la misma serie de distancias y compiten por CPU. Ver `ANALYTICS.md` §11.3.
+
+#### 4.13.3 `GET /api/v1/analytics/racha3/por-hora`
+
+Análisis temporal en hora Colombia. **Siempre las 24 horas**, incluso las que no tienen ninguna oportunidad: una hora ausente se leería como "no hay datos", mientras que una fila con `muestra_n: 0` lo dice explícitamente.
+
+```json
+{
+  "data": {
+    "unidad_tasas": "fraccion_0_1",
+    "zona_horaria": "America/Bogota",
+    "ventana": { "desde": "…", "hasta": "…" },
+    "horas": [
+      { "hora_col": 0, "total": 168, "frecuencia_historica": 0.0413,
+        "resueltas": 168, "directa": 88, "mg1": 41, "mg2": 20, "perdidas": 19,
+        "tasa_directa": 0.5238, "tasa_mg1": 0.2440, "tasa_mg2": 0.1190,
+        "tasa_perdida": 0.1131, "tasa_acierto_total": 0.8869,
+        "muestra_n": 168, "muestra_integridad_dudosa": 0,
+        "ventana_desde": "…", "ventana_hasta": "…",
+        "zona_horaria": "America/Bogota", "advertencia_muestra": null }
+    ],
+    "nota": "Las tasas por hora vienen con su muestra_n. Con la muestra actual, cada hora ronda las ~170 observaciones: diferencias de varios puntos entre horas son compatibles con el azar. Una hora no es mejor por tener mejor tasa."
+  },
+  "requestId": "…"
+}
+```
+
+#### 4.13.4 `GET /api/v1/analytics/racha3/por-dia`
+
+Frecuencia por día calendario de Bogotá. **Si no acotás la ventana, se usan los últimos 90 días** (`dias_por_defecto`): sin ese default la respuesta crecería una fila por día para siempre.
+
+```json
+{
+  "data": {
+    "unidad_tasas": "fraccion_0_1",
+    "zona_horaria": "America/Bogota",
+    "dias_por_defecto": 90,
+    "dias": [
+      { "dia_col": "2026-08-21", "total": 121, "resueltas": 121,
+        "directa": 63, "mg1": 30, "mg2": 15, "perdidas": 13,
+        "tasa_acierto_total": 0.8926, "tasa_perdida": 0.1074,
+        "muestra_n": 121, "muestra_integridad_dudosa": 0,
+        "zona_horaria": "America/Bogota", "advertencia_muestra": null }
+    ]
+  },
+  "requestId": "…"
+}
+```
+
+#### 4.13.5 `GET /api/v1/analytics/racha3/distancia-actual`
+
+Cuántas jugadas van desde la última Racha 3, **con el contexto histórico completo**. Query propio: `cotas`.
+
+```json
+{
+  "data": {
+    "zona_horaria": "America/Bogota",
+    "cotas": [5, 10, 15, 20, 30, 50],
+    "distancia": {
+      "jugadas_desde_ultima": 8,
+      "jugadas_sin_procesar": 0,
+      "distancia_exacta": true,
+      "ultima_jugada_confirmacion_id": 43036,
+      "ultima_confirmacion_en": "2026-09-08T00:47:47.859Z",
+      "ultima_hora_col": 19,
+      "ultima_tipo_racha": "BANKER",
+      "ultima_estado": "RESUELTA",
+      "ultima_resultado_final": "MG2",
+      "jugada_mas_reciente_id": 43083,
+      "jugada_mas_reciente_en": "2026-09-08T01:13:38.612Z",
+      "zona_horaria": "America/Bogota"
+    },
+    "bucket_actual": {
+      "bucket": "6-10", "orden": 2,
+      "casos_observados": 11701, "eventos": 1551,
+      "tasa_empirica_condicionada": 0.1326,
+      "intervalos_en_bucket": 1551,
+      "frecuencia_historica": 0.3819,
+      "muestra_n": 4061, "advertencia_muestra": null
+    },
+    "buckets": [ "… los 7 buckets …" ],
+    "nota": "frecuencia_historica y tasa_empirica_condicionada son magnitudes distintas y no comparables…"
+  },
+  "requestId": "…"
+}
+```
+
+**Devuelve los 7 buckets, no sólo el vigente.** Un número aislado ("13 %") invita exactamente a la lectura que el dominio prohíbe; con la tabla completa a la vista se ve que la tasa es prácticamente plana a partir de la sexta jugada, y que por lo tanto la distancia acumulada **no informa** mucho en este histórico.
+
+**`distancia_exacta` y `jugadas_sin_procesar` son parte del contrato, no metadata decorativa.** `jugadas_desde_ultima` se cuenta sobre las jugadas reales, incluidas las que el incremental todavía no procesó. Si `distancia_exacta` es `false`, podría existir una Racha 3 ya ocurrida y aún no detectada dentro de ese rezago, y entonces la distancia real sería **menor** que la informada. Ocultarlo convertiría una estimación en una afirmación.
+
+Definición explícita del hazard, porque es donde se cometen los errores:
+
+- `casos_observados(d)` = jugadas del historial que **estuvieron** a distancia `d` de la confirmación anterior (el conjunto en riesgo). Un intervalo de largo `k` aporta un caso a cada `d` de 1..k; la cola posterior a la última confirmación también aporta, sin evento.
+- `eventos(d)` = de esos casos, en cuántos la jugada fue ella misma una confirmación.
+- `tasa_empirica_condicionada` = `eventos / casos_observados`.
+
+`incluir_bloqueadas` se aplica con el **mismo valor** a la distancia y a los buckets: la distancia sólo es comparable contra ellos si se mide sobre la misma serie con la que se construyeron.
+
+#### 4.13.6 `GET /api/v1/analytics/racha3/perdidas`
+
+Distancia entre pérdidas (`LOSS`). Misma forma de respuesta que `/intervalos`, con `entre` forzado a `PERDIDAS`. Query propio: `metrica`, `cotas`.
+
+Sobre el histórico: mediana **62,5 jugadas** entre pérdidas (promedio 86,25, máximo 674), n = 492 (= `#LOSS − 1`).
+
+#### 4.13.7 `GET /api/v1/analytics/racha3/columnas/distribucion`
+
+Longitudes de columna por tipo. Base del futuro concepto "L" (columna PLAYER/BANKER de longitud ≥ 6).
+
+Query propio: `tipo`, `maximo` (entero 2–50, default 10 — longitudes ≥ `maximo` se agrupan en `"10+"`).
+
+```json
+{
+  "data": {
+    "maximo": 10,
+    "columnas": [
+      { "tipo": "BANKER", "longitud": "1", "orden": 1, "n": 2971,
+        "frecuencia_historica": 0.2809, "truncadas": 4, "muestra_n": 10578 },
+      { "tipo": "BANKER", "longitud": "10+", "orden": 10, "n": 3,
+        "frecuencia_historica": 0.0003, "truncadas": 0, "muestra_n": 10578 }
+    ]
+  },
+  "requestId": "…"
+}
+```
+
+`truncadas` cuenta las columnas cuya longitud observada pudo quedar cortada por un hueco del historial. En un análisis de longitudes es exactamente el dato que no debe pasarse por alto, porque sesga hacia longitudes menores.
+
+#### 4.13.8 `GET /api/v1/analytics/racha3/estado`
+
+Salud del pipeline derivado. Sin parámetros.
+
+```json
+{
+  "data": {
+    "checkpoint_existe": true,
+    "ultima_jugada_procesada": 43083,
+    "ultima_jugada_procesada_en": "2026-09-08T01:13:38.612Z",
+    "reproceso_desde_jugada_id": 43081,
+    "checkpoint_actualizado_en": "2026-09-08T01:14:02.104Z",
+    "jugadas_sin_procesar": 0,
+    "jugada_mas_reciente_id": 43083,
+    "jugada_mas_reciente_en": "2026-09-08T01:13:38.612Z",
+    "total_jugadas": 42464,
+    "total_columnas": 25417,
+    "total_oportunidades": 4119,
+    "oportunidades_pendientes": 0,
+    "ejecucion_id": 31,
+    "ejecucion_tipo": "INCREMENTAL",
+    "ejecucion_estado": "OK",
+    "ejecucion_error": null,
+    "ejecucion_duracion_ms": 87,
+    "ejecucion_en": "2026-09-08T01:14:02.104Z",
+    "al_dia": true
+  },
+  "requestId": "…"
+}
+```
+
+**Es lo que permite distinguir "no hay Racha 3 nuevas" de "el procesamiento está caído"**: sin este endpoint, desde afuera se ven igual. `al_dia: false` con `jugadas_sin_procesar` creciendo significa que el pipeline está detenido.
+
+`al_dia` = `checkpoint_existe && jugadas_sin_procesar === 0`. Se deriva en el backend para que no lo reinvente cada cliente con un umbral distinto.
+
+#### 4.13.9 `POST /api/v1/analytics/racha3/reprocesar`
+
+Dispara una corrida **incremental** a pedido. Único endpoint de este recurso que escribe. Sin body, sin query. Responde **201**.
+
+```json
+{
+  "data": {
+    "tipo": "INCREMENTAL",
+    "estado": "OK",
+    "hubo_cambios": true,
+    "ejecucion_id": 31,
+    "desde_jugada_id": 43043,
+    "hasta_jugada_id": 43083,
+    "jugadas_leidas": 41,
+    "columnas_afectadas": 34,
+    "operaciones_afectadas": 7,
+    "duracion_ms": 87,
+    "error": null
+  },
+  "requestId": "…"
+}
+```
+
+`estado` puede ser `OK`, `ERROR_PROCESO` (la función corrió y abortó su propio trabajo — p. ej. detectó una inserción retroactiva; todo se revirtió y el checkpoint no avanzó) o `NO_DISPONIBLE` (sin conexión a la base). En los dos últimos casos `error` trae el motivo. **Ninguno lanza una excepción HTTP**: la respuesta es 201 con el desenlace descrito, porque el disparo se ejecutó y su resultado es información, no un fallo de la petición.
+
+Sin jugadas nuevas, `hubo_cambios` es `false` y no se toca ni una fila.
+
+**No expone el rebuild**, a propósito: es destructivo (`TRUNCATE`) y dura segundos, así que queda como operación de línea de comandos (`pnpm analytics:rebuild`), donde quien la ejecuta ve lo que hace.
+
+Autenticación: el mismo `X-Api-Key` que todo lo demás. No hay un nivel admin aparte — mismo criterio que `POST /api/v1/admin/reports` (§4.9). La concurrencia con el scheduler interno de 60 s no requiere coordinación: `analytics_racha3_incremental()` toma `pg_advisory_xact_lock(42, 3)`, así que un disparo manual y un tick simultáneos se serializan solos y el segundo encuentra el trabajo ya hecho.
+
+---
+
 ## 5. Cómo se relacionan `operations`, `channels` y `events/stream` (flujo típico de una página del frontend)
 
 **0. Antes de que cualquier estrategia haga algo** (típicamente una vez por cada arranque del proceso, ver §1): pintar el selector con `GET /api/v1/strategies` (§4.11) y configurar los canales con lo que elija el usuario, por ejemplo:
@@ -526,7 +851,8 @@ Cada página del frontend (`/panel/oficial`, `/panel/pruebas`) sigue este patró
 
 ## 7. Qué NO existe todavía (fuera de alcance, a propósito)
 
-- **`GET /api/v1/results`** (historial profundo desde la base de datos `jugadas`) — no se activó la ingesta a la tabla; solo existe la ventana en memoria de 200 jugadas (§4.3). Ver Mk-Api.md Anexo D §1.
+- **`GET /api/v1/results`** (listado crudo y paginado de `jugadas` desde la base) — **sigue sin existir, pero ya no por falta de datos**: la ingesta está activa desde `Mk-Ingestion-Service` y hay ~42.500 filas. La necesidad real resultó ser evidencia estadística agregada, no un listado de jugadas crudas, y eso lo cubre `GET /api/v1/analytics/racha3/*` (§4.13). Para el contexto inmediato sigue estando la ventana en memoria de 200 jugadas (§4.3). Si algún día hace falta el listado crudo, el diseño acordado (cursor sobre `id`) está en Mk-Api.md ADR-12 — con la advertencia de que `jugadas.id` **no es contiguo**, así que el cursor debe ser `id > último ORDER BY id`, nunca `BETWEEN`.
+- **Rebuild histórico de Analytics por HTTP** — deliberadamente no expuesto: es destructivo (`TRUNCATE`) y dura segundos. Se hace con `pnpm analytics:rebuild` (ver `ANALYTICS.md` §10.1). Por HTTP sólo se puede disparar el incremental (§4.13.9).
 - **Allowlist de CORS por dominio** — implementada vía la variable de entorno `CORS_ALLOWED_ORIGINS` (coma-separada, ver `.env.example`). Sin definirla, `main.ts` cae a `origin: true` (cualquier origen) para no bloquear el desarrollo local; en el despliegue real hay que fijarla con el/los dominio(s) reales del frontend.
 - **Rate limiting** — implementado con `@nestjs/throttler` como `APP_GUARD` global (`AppModule`): por defecto 300 requests/minuto por IP (`RATE_LIMIT_LIMIT`/`RATE_LIMIT_TTL_MS`, ver `.env.example`), suficiente margen para el patrón de sondeo descrito en §5. Al excederlo, la API responde `429 Too Many Requests` con el mismo envelope de error (`ApiErrorCode.RATE_LIMITED`). `GET /api/v1/events/stream` (SSE) está exento — es una conexión larga, no peticiones repetidas.
 - **Roles/multiusuario/JWT** — decisión de negocio: un único secreto compartido es suficiente, no hay operadores humanos diferenciados.
@@ -555,5 +881,7 @@ Cada página del frontend (`/panel/oficial`, `/panel/pruebas`) sigue este patró
 | `CORS_ALLOWED_ORIGINS` | Allowlist de orígenes CORS, coma-separada. Sin definir, acepta cualquier origen |
 | `RATE_LIMIT_LIMIT` / `RATE_LIMIT_TTL_MS` | Tope/ventana del rate limit global por IP (default 300/60000ms) |
 | `PORT` | Puerto HTTP (ya existía, sin cambios) |
+| `DATABASE_URL` | Sin ella, los endpoints de Analytics (§4.13) responden `503 UNAVAILABLE`. El resto de la API no depende de la base |
+| `ANALYTICS_INTERVAL_MS` | Cada cuánto el backend procesa las jugadas nuevas hacia las tablas derivadas de Analytics (default 60000). No afecta a los endpoints, sí a cuán fresco está lo que devuelven — visible en `GET /api/v1/analytics/racha3/estado` (§4.13.8) |
 
 Ver `.env.example` para la lista completa (incluye las de Telegram/Tipminer/DB, no específicas de esta capa).

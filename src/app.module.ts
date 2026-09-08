@@ -12,6 +12,7 @@ import { NotificationModule } from './application/notification/notification.modu
 import { StatisticsModule } from './application/statistics/statistics.module';
 import { ObservabilityModule } from './application/observability/observability.module';
 import { ReportingModule } from './application/reporting/reporting.module';
+import { AnalyticsModule } from './application/analytics/analytics.module';
 import { PersistenceModule } from './infrastructure/persistence/persistence.module';
 
 /**
@@ -65,6 +66,12 @@ import { PersistenceModule } from './infrastructure/persistence/persistence.modu
     StatisticsModule,
     ObservabilityModule,
     ReportingModule,
+    // Analytics histórico de Racha 3. Deliberadamente desacoplado del motor
+    // de alertas: no se suscribe al DomainEventBus, no conoce Strategy,
+    // Operation ni Notification, y su único punto de contacto con el resto
+    // del sistema es la conexión a Postgres. Si falla o queda deshabilitado,
+    // la detección de rachas y el envío de alertas no se ven afectados.
+    AnalyticsModule,
     PersistenceModule,
     ApiModule,
   ],

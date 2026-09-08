@@ -26,7 +26,9 @@
     "db:generate": "prisma generate",
     "db:migrate:dev": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "analytics:verify": "ts-node --transpile-only -P tsconfig.json scripts/analytics-verify.ts",
+    "analytics:rebuild": "ts-node --transpile-only -P tsconfig.json scripts/analytics-rebuild.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

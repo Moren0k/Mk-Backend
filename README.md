@@ -57,8 +57,9 @@ pnpm start:dev
 | `TIPMINER_PROVIDER_ID` | uuid de la mesa Bac Bo en Tipminer. Trae un valor por defecto. |
 | `TIPMINER_TIMEZONE` | Timezone usada al pedir el historial. Opcional. |
 | `TIPMINER_API_KEY` | Reservado para cuando la API deje de ser pública; hoy no se usa. |
-| `DATABASE_URL` | Conexión pooled (pgbouncer, puerto 6543) a PostgreSQL/Supabase. Opcional: mientras no esté definida, `PrismaService` arranca deshabilitado y el bot sigue funcionando igual, sin persistencia (ver `src/infrastructure/persistence/`). |
-| `DIRECT_URL` | Conexión session-mode (puerto 5432) a la misma base, usada únicamente por Prisma Migrate. |
+| `DATABASE_URL` | Conexión pooled (pgbouncer, puerto 6543) a PostgreSQL/Supabase. Opcional: mientras no esté definida, `PrismaService` arranca deshabilitado y el bot sigue funcionando igual, sin persistencia (ver `src/infrastructure/persistence/`). Sin ella, los endpoints de Analytics responden `503`. |
+| `DIRECT_URL` | Conexión session-mode (puerto 5432) a la misma base, usada por Prisma Migrate y por los scripts `analytics:*`. |
+| `ANALYTICS_INTERVAL_MS` | Cada cuánto se procesan las jugadas nuevas hacia las tablas derivadas de Analytics. Opcional, default `60000`. Un tick sin jugadas nuevas no toca la base. |
 
 ### Scripts
 
@@ -134,11 +135,31 @@ src/
 
 ## Base de datos
 
-`prisma/schema.prisma` define la conexión a PostgreSQL/Supabase y el modelo `Jugada`
-(tabla `jugadas`): el historial real de rondas de BacBo, fuente de verdad para el
-futuro motor de análisis de patrones. Cómo conectarse (código, `psql`, Prisma Studio,
-panel de Supabase), el esquema completo y las decisiones de diseño están en
-[`DATABASE.md`](./DATABASE.md).
+`prisma/schema.prisma` define la conexión a PostgreSQL/Supabase y **seis tablas**:
+
+- `jugadas` (modelo `Jugada`): el historial real de rondas de BacBo, fuente de verdad de todo lo derivado. La escribe **`Mk-Ingestion-Service`**, un servicio aparte; este backend no escribe en ella.
+- `report_checkpoints`: contadores de reporte que sobreviven a un reinicio.
+- `columnas`, `racha3_operaciones`, `analytics_checkpoints`, `analytics_ejecuciones`: dominio derivado de **Analytics histórico "Racha 3"**, con 1 vista y 17 funciones SQL. Todo se reconstruye desde `jugadas`.
+
+Cómo conectarse (código, `psql`, Prisma Studio, panel de Supabase), el esquema
+completo y las decisiones de diseño están en [`DATABASE.md`](./DATABASE.md).
+
+## Analytics histórico
+
+`GET /api/v1/analytics/racha3/*` expone evidencia estadística sobre la estrategia
+Racha 3 calculada en PostgreSQL (frecuencia, resultados de operación, intervalos,
+análisis por hora de Colombia, tasa empírica condicionada por distancia). Un tick de
+60 s procesa las jugadas nuevas hacia las tablas derivadas.
+
+**Analytics no predice ni decide alertas**: entrega evidencia histórica y la decisión
+la mantiene el motor. La referencia completa del dominio — semántica exacta, umbral de
+gap, invariantes, verificación cruzada TypeScript ↔ SQL y limitaciones conocidas —
+está en [`ANALYTICS.md`](./ANALYTICS.md).
+
+```bash
+pnpm analytics:rebuild   # reconstrucción histórica completa (destructiva solo para lo derivado)
+pnpm analytics:verify    # verificación TS ↔ SQL + invariantes. Debe dar 0 diferencias
+```
 
 ![Diagrama de la tabla jugadas](docs/Database.png)
 

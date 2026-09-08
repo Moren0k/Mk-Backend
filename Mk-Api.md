@@ -13,7 +13,9 @@
 
 ## 1.1 Qué problema resuelve
 
-El backend actual carece de una **frontera de comunicación formal** con un frontend. Hoy la única exposición HTTP es `POST /admin/commands` (uso interno) y `GET /healthz` (healthcheck de plataforma) (**hecho** — verificado en `src/application/admin/admin.controller.ts` y `src/main.ts`). Todo lo demás vive dentro del motor: colección de jugadas, estrategias, operaciones, notificaciones, estadísticas, persistencia.
+El backend actual carece de una **frontera de comunicación formal** con un frontend. Hoy la única exposición HTTP es `POST /admin/commands` (uso interno) y `GET /healthz` (healthcheck de plataforma) (**hecho** — verificado en `src/main.ts` y en el `AdminController` de `src/application/admin/`). Todo lo demás vive dentro del motor: colección de jugadas, estrategias, operaciones, notificaciones, estadísticas, persistencia.
+
+> **Estado posterior (2026-09-08).** Este párrafo describe el punto de partida del análisis, no el estado actual. `POST /admin/commands` y su controller **ya no existen**: se borraron junto con toda la administración por contraseña, y de `src/application/admin/` solo queda `admin-command.type.ts`. Lo administrativo vive hoy en `POST /api/v1/admin/reports` (ADR-11), y la API propia está implementada bajo `/api/v1` (ver `documentacion_mk_api.md`). Se deja el texto original porque el resto del documento razona a partir de él.
 
 Cuando llegue un frontend, necesitará consumir información (resultados, estadísticas, estados, eventos, historial) y, más adelante, emitir órdenes (configuraciones, comandos administrativos). Sin una capa de API, ese frontend tendría que:
 
@@ -920,13 +922,65 @@ Consecuencias para escalar (sin reconstruir):
 - **Trade-offs:** mantener dos rutas temporalmente (bajo coste, controlado).
 - **Impacto:** contrato admin estable para el frontend futuro.
 
-## ADR-12: Persistencia de `jugadas` como fuente futura de resultados históricos, activada por decisión de negocio (PENDIENTE)
+## ADR-12: Persistencia de `jugadas` como fuente futura de resultados históricos, activada por decisión de negocio (RESUELTA — 2026-09-08)
 - **Problema:** si la API expondrá historial profundo (DB) o solo la ventana en memoria.
 - **Opciones:** activar ingesta `jugadas` (esquema listo); solo memoria; ambas con fallback.
 - **Recomendada ante la info disponible:** definir en Fase 0 con evidencia de coste de ingesta; el diseño del contrato (paginación cursor en `id`) queda acordado ya para ambas fuentes.
-- **Justificación:** el esquema ya existe pero nada ingresa aún (hecho); no asumir coste de ingesta sin auditoría.
+- **Justificación:** el esquema ya existe pero nada ingresa aún (hecho **al momento del análisis**, 2026-08-10 — ya no es cierto, ver "Cómo se resolvió" más abajo); no asumir coste de ingesta sin auditoría.
 - **Trade-offs:** memoria = ventana 200 (limitado); DB = coste de ingesta + índices (ya indexados).
 - **Impacto:** decisión bloqueante para Fase 6, no para F3-F5.
+- **Cómo se resolvió:** la ingesta **está activa** — la hace `Mk-Ingestion-Service`, un servicio aparte, por lotes con `ON CONFLICT (uuid) DO NOTHING` (ver `DATABASE.md` §1). `Mk-Backend` sigue sin escribir en `jugadas`. Al 2026-09-08 hay ~42.500 filas.
+- **Qué cambió respecto de lo previsto:** el historial profundo **no** se expuso como `GET /api/v1/results` con paginación por cursor. La necesidad real resultó ser evidencia estadística agregada, no un listado de jugadas crudas, y eso se resolvió con el dominio de Analytics (ADR-13): `GET /api/v1/analytics/racha3/*`. La paginación por cursor en `id` queda sin usar y sin implementar; si algún día hace falta el listado crudo, ese diseño sigue siendo el acordado. Advertencia relevante: `jugadas.id` **no es contiguo**, así que un cursor debe ser `id > último ORDER BY id`, nunca `BETWEEN`.
+
+---
+
+
+## ADR-13: Analytics histórico "Racha 3" — toda la estadística en SQL, la API sólo proyecta
+
+**Contexto.** Se necesitaba evidencia histórica sobre la estrategia Racha 3 (frecuencia, resultados de operación, intervalos, análisis horario, tasa condicionada por distancia) sobre ~42.000 jugadas ya persistidas, sin recalcular el histórico completo en cada lote nuevo y sin que el motor de alertas se viera afectado.
+
+**Decisión.** El dominio se implementó con esta división, y la frontera es lo importante:
+
+1. **Toda la lógica analítica vive en PostgreSQL** — 4 tablas derivadas, 1 vista y 17 funciones (migraciones `20260907234500` a `20260908040000`). Ni el repositorio, ni el read-model, ni el controller calculan una tasa, un promedio o un filtro adicional.
+2. **La capa `api/` sólo valida parámetros y proyecta a view models.** Los 8 GET + 1 POST están documentados en `documentacion_mk_api.md` §4.13.
+3. **No hay microservicio de Analytics.** El código existente no lo justificaba: 14 MB de datos, ~2.600 jugadas/día, y ya existían `PersistenceModule`/`PrismaService` con la propiedad de "nunca tumba el motor".
+4. **No se materializa ninguna agregación.** Con ~4.100 oportunidades toda consulta se resuelve en 14–126 ms; una tabla derivada de una tabla derivada sólo agregaría un segundo problema de consistencia. Umbral acordado para reconsiderarlo: ~500k filas o p95 > 200 ms.
+
+**Por qué la frontera importa tanto.** La capa SQL se verifica contra una implementación de referencia **independiente** en TypeScript (`src/core/analytics/racha3-reference.ts`), que además conduce la clase `Operation` **real** del motor. `pnpm analytics:verify` exige 0 diferencias campo a campo sobre las ~25.400 columnas y ~4.100 oportunidades, más 12 invariantes del dominio. Cualquier cálculo que se filtrara a `application/` o `api/` quedaría **fuera del alcance de esa verificación**, y ahí es donde Analytics y el motor podrían empezar a divergir en silencio. Esa verificación ya encontró una divergencia real que ninguna prueba unitaria habría detectado: `EXTRACT(epoch …)::integer` redondea en PostgreSQL mientras `Math.trunc` trunca, y produjo 2.086 diferencias de 1 segundo.
+
+**Contrato: dos divergencias deliberadas frente al resto de la API.**
+
+- **Nombres en español `snake_case`** (`frecuencia_historica`, `tasa_empirica_condicionada`, `muestra_n`, `advertencia_muestra`), no inglés camelCase como `GET /api/v1/statistics` (`totalGames`, `playerWinRate`). La razón no es estilística: esa terminología **es parte del contrato**. `frecuencia_historica` y `tasa_empirica_condicionada` son magnitudes distintas y no comparables, y traducirlas a algo como `empiricalRate` borraría precisamente la distinción que los nombres existen para sostener. Se mantiene el mismo vocabulario desde la columna de PostgreSQL hasta el JSON, sin traducción intermedia donde pueda perderse el significado.
+- **Ninguna métrica se llama `probabilidad`, `prediccion` ni `confianza`.** Analytics describe lo que ya ocurrió; convertir una frecuencia en probabilidad predictiva exige supuestos que estos datos no contienen. La decisión de alertar la mantiene el Core. Hay una prueba que recorre el payload y falla si aparece cualquiera de esas tres palabras.
+
+**Unidades.** Todas las proporciones son **fracciones en [0,1]**, nunca porcentajes, y cada respuesta que las lleva lo declara en `unidad_tasas: "fraccion_0_1"`. Mezclar fracciones y porcentajes es una fuente clásica de errores por factor 100; formatear es responsabilidad de quien presenta. Junto a cada proporción va su conteo crudo, para que el consumidor pueda recomputarla.
+
+**Defaults asimétricos, a propósito.** `incluir_bloqueadas=false` (el consumidor natural es el Core, y las oportunidades que el motor no habría podido operar distorsionarían su lectura) pero `incluir_integridad_dudosa=true` (son observaciones reales de lo que sí quedó registrado; excluirlas por defecto sería descartar datos en silencio). En ambos casos la respuesta reporta cuántas filas están involucradas: `muestra_bloqueadas_excluidas` y `muestra_integridad_dudosa`.
+
+**Validación a mano, sin dependencias nuevas.** Igual que `AdminController` y `ChannelsController`: el proyecto no usa `class-validator` ni un `ValidationPipe` global (ver ADR-6, que quedó como intención no ejecutada), y sumar una dependencia para ocho endpoints de lectura sería cambiar una convención establecida por comodidad. Todo parámetro desconocido o mal formado devuelve 400 en vez de caer a un default silencioso: un typo en `tipo=PLAYERR` que devolviera el total de ambos lados sería peor que un error, porque el cliente creería estar viendo lo que pidió.
+
+**Autorización: no se creó un nivel admin.** El único endpoint de escritura (`POST /api/v1/analytics/racha3/reprocesar`) usa el mismo `ApiKeyGuard` que todo lo demás, siguiendo el precedente que ya sentó `POST /api/v1/admin/reports` (ADR-11). Ese endpoint dispara **sólo el incremental**; el rebuild queda como operación de línea de comandos (`pnpm analytics:rebuild`) porque es destructivo (`TRUNCATE`) y dura segundos. La exclusión mutua no depende de coordinar API y scheduler: `analytics_racha3_incremental()` toma `pg_advisory_xact_lock(42, 3)`.
+
+**Consecuencias.**
+
+- El motor de alertas no se modificó. `AnalyticsModule` no se suscribe al `DomainEventBus` y ninguno de sus subscribers lo conoce; el único archivo del motor que cambió es `app.module.ts`, para sumar el módulo a la lista de imports.
+- La conversión de tipos de Prisma (`BigInt`, `Decimal`) queda encapsulada en `infrastructure/`: ninguno de los dos sobrevive a `JSON.stringify`, así que devolver una fila cruda desde un controller produciría un 500.
+- Sin N+1: máximo 2 consultas SQL por petición, verificado con `pg_stat_statements`.
+- Deuda aceptada: `GET /intervalos` tarda ~910 ms porque sus dos consultas recomputan la misma serie de distancias y compiten por CPU. Si se optimiza, debe hacerse en SQL, no serializando el `Promise.all`. Ver `ANALYTICS.md` §11.3.
+
+**Alternativas descartadas.**
+
+| Alternativa | Por qué no |
+|---|---|
+| Microservicio de Analytics aparte | El volumen y la carga no lo justifican; ya existía la infraestructura de persistencia |
+| Calcular las agregaciones en `application/` | Quedarían fuera del alcance de la verificación TS↔SQL, que es el único mecanismo que impide que Analytics y el motor divergan |
+| Tabla `racha3_estadisticas` materializada | Segundo problema de consistencia a cambio de cero beneficio medible a esta escala |
+| Trigger `AFTER INSERT` en `jugadas` | Acoplaría la latencia de escritura del microservicio de ingesta al procesamiento derivado |
+| `pg_cron` para el tick | Disponible pero no instalado; sin observabilidad desde la app ni ejecución on-demand |
+| Nombres en inglés camelCase, coherentes con el resto de la API | Borraría la distinción entre frecuencia y tasa condicionada, que es la que evita la mala lectura |
+| Exponer el rebuild por HTTP | Destructivo y de segundos: un foot-gun detrás de un `curl` |
+
+**Referencias.** `ANALYTICS.md` (referencia completa del dominio), `DATABASE.md` §11 (esquema), `documentacion_mk_api.md` §4.13 (contrato de los endpoints).
 
 ---
 

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { AdminModule } from './resources/admin/admin.module';
+import { Racha3AnalyticsApiModule } from './resources/analytics/analytics.module';
 import { AuthModule } from './resources/auth/auth.module';
 import { ChannelsModule } from './resources/channels/channels.module';
 import { EventsModule } from './resources/events/events.module';
@@ -40,6 +41,7 @@ import { StrategiesModule } from './resources/strategies/strategies.module';
     EventsModule,
     ReportsModule,
     StrategiesModule,
+    Racha3AnalyticsApiModule,
   ],
 })
 export class ApiModule {}

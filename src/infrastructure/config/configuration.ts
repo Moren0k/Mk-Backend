@@ -77,6 +77,15 @@ export default () => ({
     url: process.env.DATABASE_URL,
     directUrl: process.env.DIRECT_URL,
   },
+  analytics: {
+    // Cada cuánto Racha3IncrementalScheduler dispara
+    // `analytics_racha3_incremental()` (ver src/application/analytics/).
+    // Default 60 s. No hace falta más frecuencia: Analytics es descriptivo
+    // sobre decenas de miles de jugadas históricas, así que un rezago de
+    // unas pocas jugadas no cambia ninguna conclusión. Un tick sin jugadas
+    // nuevas no toca la base.
+    intervalMs: parseInt(process.env.ANALYTICS_INTERVAL_MS ?? '60000', 10),
+  },
   report: {
     // Cada cuánto ReportCheckpointScheduler persiste won/lost/alertsSent
     // por canal en la tabla report_checkpoints (ver DATABASE.md). Default

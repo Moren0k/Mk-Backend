@@ -1,5 +1,54 @@
 # Changelog — Mk-Backend / Motor de Análisis BacBo
 
+## [2026-09-08] — Analytics histórico "Racha 3"
+
+Dominio nuevo, independiente del motor de alertas: evidencia estadística sobre la estrategia Racha 3, calculada en PostgreSQL sobre las ~42.500 jugadas ya persistidas. **Analytics describe el pasado y nunca decide una alerta**; la decisión la mantiene el Core.
+
+Referencia completa en [`ANALYTICS.md`](./ANALYTICS.md).
+
+---
+
+### Añadido
+
+#### 🗄️ Modelo de datos derivado (5 migraciones)
+- **4 tablas nuevas**: `columnas`, `racha3_operaciones`, `analytics_checkpoints`, `analytics_ejecuciones` — con 26 CHECK constraints, 10 FKs y 8 índices. Todo se reconstruye al 100 % desde `jugadas`, que nunca se modifica.
+- **1 vista + 17 funciones SQL**: rebuild, incremental, validador de invariantes y 12 agregaciones de solo lectura. Nada materializado, a propósito.
+- Claves de idempotencia **naturales** (`columnas.inicio_jugada_id`, `racha3_operaciones.columna_id`), no secuencias: reejecutar un rango no puede duplicar nada.
+
+#### ⚙️ Procesamiento
+- `analytics_racha3_rebuild()` — reconstrucción histórica completa en **~2,8 s** (42.400 jugadas → 25.400 columnas → 4.100 oportunidades).
+- `analytics_racha3_incremental()` — procesa solo el tramo nuevo (9–165 ms) con punto de rebobinado seguro, guardia contra inserciones retroactivas y `pg_advisory_xact_lock(42, 3)`.
+- `Racha3IncrementalScheduler` — tick de 60 s (`ANALYTICS_INTERVAL_MS`). Un tick sin jugadas nuevas es un **no-op absoluto**: no toca ni una fila.
+- Tolerancia a los cortes esporádicos del pooler de Supabase: `warn` los primeros 4 fallos, escala a `error` al 5.º y una sola vez.
+
+#### 🌐 API — 8 GET + 1 POST bajo `/api/v1/analytics/racha3/`
+`resumen` · `intervalos` · `por-hora` · `por-dia` · `distancia-actual` · `perdidas` · `columnas/distribucion` · `estado` · `POST reprocesar`.
+- Mismo `ApiKeyGuard` y envelope que el resto de la API; sin nivel admin adicional.
+- Tasas como **fracción [0,1]**, declarado en `unidad_tasas`. Toda tasa viene con su `muestra_n`.
+- `bloqueada_por_operacion_previa` **excluida por defecto** (el consumidor es el Core), y se reporta cuántas quedaron fuera.
+- Validación estricta de parámetros: sin defaults silenciosos. `POST reprocesar` dispara solo el incremental — el rebuild queda como CLI.
+
+#### ✅ Verificación
+- `pnpm analytics:verify` — reconstruye el histórico con una implementación de referencia **independiente** en TypeScript y exige **0 diferencias campo a campo**, más 12 invariantes (V0–V11) y 12 comprobaciones de la capa de agregación. La referencia conduce la clase `Operation` **real** del motor, así que un cambio en la regla de martingala rompe la verificación en vez de dejar que Analytics y el motor divergan en silencio.
+- `pnpm analytics:rebuild` — reconstrucción histórica explícita.
+- **+104 pruebas** (616 en total): 30 fixtures del dominio, 19 del scheduler, 9 del repositorio, 26 de validación de parámetros, 17 del controller, 3 de cableado DI.
+
+### Corregido
+
+- **`analytics_racha3_validar()` evaluaba contra todas las jugadas** en vez de acotarse al checkpoint, así que V1/V8/V11 reportaban como violación lo que solo era rezago del incremental (migración correctiva `20260908030000`).
+- **`segundos_desde_anterior` divergía en 1 s** entre SQL y TypeScript: `EXTRACT(epoch …)::integer` redondea en PostgreSQL y `Math.trunc` trunca. Semántica fijada en truncamiento; lo detectó la verificación cruzada, con 2.086 diferencias.
+- **`tsconfig.build.json`**: incluir `scripts/` movía la raíz común del proyecto y `nest build` emitía `dist/src/main.js` en vez de `dist/main.js`, rompiendo `pnpm start:prod`.
+- **Documentación desactualizada**: `DATABASE.md` y `ARCHITECTURE.md` afirmaban que faltaba un servicio que poblara `jugadas` (lo hace `Mk-Ingestion-Service` desde hace semanas); `Mk-Api.md` ADR-12 figuraba como PENDIENTE y referenciaba un archivo ya borrado.
+
+### Notas
+
+- **El motor de alertas no se modificó.** El único archivo suyo que cambió es `app.module.ts`, para sumar `AnalyticsModule` a los imports. Analytics no se suscribe al `DomainEventBus`.
+- **Deuda conocida y aceptada**: `GET /intervalos` tarda ~910 ms porque sus dos consultas recomputan la misma serie de distancias y compiten por CPU. Si se optimiza, debe hacerse en SQL.
+- **Riesgo operativo abierto**: `PrismaService` conecta una única vez en `onModuleInit` y no reintenta; un corte del pooler en el arranque deja la persistencia deshabilitada hasta reiniciar. Afecta también a Reporting, así que no se resolvió desde Analytics.
+- **Limitación de los datos**: 19 discontinuidades > 120 s en el histórico, una de 3,3 h con ~361 rondas irrecuperables. Efecto acotado y explícito — 10 de 4.119 oportunidades con `integridad_ok = false`, reportadas en cada respuesta.
+
+---
+
 ## [2026-08-02] — Notificaciones Personalizadas, Empates, Borrado de Mensajes y Robustez
 
 ---

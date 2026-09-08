@@ -6,14 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Motor de procesamiento de eventos en tiempo real (NestJS + Fastify) que analiza jugadas de BacBo (Evolution, vía la API pública de Tipminer), detecta rachas, simula operaciones de apuesta con martingala y notifica resultados por Telegram.
 
-**No es un CRUD ni una API REST tradicional.** Todo el sistema gira alrededor de un único disparador — *llega una jugada nueva* — y los componentes se comunican exclusivamente a través de un `DomainEventBus` interno, sin conocerse entre sí directamente.
+**No es un CRUD ni una API REST tradicional.** El **motor de alertas** gira alrededor de un único disparador — *llega una jugada nueva* — y sus componentes se comunican exclusivamente a través de un `DomainEventBus` interno, sin conocerse entre sí directamente.
+
+Además del motor hay un **segundo dominio, independiente y con su propio disparador**: Analytics histórico "Racha 3" (`analytics/` en las tres capas, ver [`ANALYTICS.md`](./ANALYTICS.md)). No se suscribe al `DomainEventBus`, no conoce Strategy/Operation/Notification y ninguno de ellos lo conoce; su disparador es un tick de 60 s que procesa las jugadas nuevas hacia tablas derivadas en PostgreSQL. Si Analytics falla o queda sin base de datos, el motor de alertas sigue funcionando exactamente igual — y al revés. No mezclar los dos dominios: **Analytics describe el pasado, nunca decide una alerta.**
 
 Documentación de referencia (leer antes de tocar la arquitectura):
 - [`README.md`](./README.md) — visión general, variables de entorno, diagrama de secuencia.
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — capas, eventos, módulos NestJS y decisiones de diseño clave (§8), incluyendo por qué el orden de `imports` de NestJS no debe importar para la corrección del sistema.
 - [`API.md`](./API.md) — contrato verificado de la API de Tipminer (endpoints, IDs de la mesa Bac Bo, formato SSE).
 - [`documentacion_mk_api.md`](./documentacion_mk_api.md) — contrato completo de **nuestra** API propia (`src/api/`): cada endpoint, auth, request/response, códigos de error, formato SSE. Actualizar este documento junto con cualquier cambio en `src/api/`.
-- [`DATABASE.md`](./DATABASE.md) — base de datos (PostgreSQL/Supabase vía Prisma): cómo conectarse, esquema real de la tabla `jugadas`, diagramas y decisiones de diseño.
+- [`DATABASE.md`](./DATABASE.md) — base de datos (PostgreSQL/Supabase vía Prisma): cómo conectarse, esquema real de las 6 tablas (`jugadas`, `report_checkpoints` y las 4 derivadas de Analytics en §11), diagramas y decisiones de diseño.
+- [`ANALYTICS.md`](./ANALYTICS.md) — referencia única del dominio Analytics histórico "Racha 3": semántica exacta (columna, gap de 120000 ms, operación, TIE, MG1/MG2/LOSS, PENDIENTE), banderas `bloqueada_por_operacion_previa` e `integridad_ok`, rebuild/incremental/checkpoint, las 17 funciones SQL, invariantes V0–V11, verificación TS↔SQL, y limitaciones conocidas. **Leer antes de tocar cualquier cosa bajo `analytics/`.** Analytics no predice ni decide alertas: entrega evidencia histórica y el Core mantiene la decisión.
 - [`Mk-Api.md`](./Mk-Api.md) — bitácora de decisiones/ADRs de diseño de `src/api/` (por qué se construyó así, alternativas descartadas). Referenciada por decenas de comentarios en `src/api/` y `src/application/` (`grep -r "Mk-Api.md" src/`) — no borrar sin antes limpiar esas referencias.
 - `INIT.md` — documento de arquitectura original/objetivo (fuente de verdad conceptual; `ARCHITECTURE.md` describe el estado real implementado).
 
@@ -32,7 +35,12 @@ pnpm test               # suite unitaria (jest)
 pnpm test:watch
 pnpm test:cov
 pnpm test:e2e           # jest con test/jest-e2e.json
+
+pnpm analytics:rebuild  # reconstrucción histórica completa de Analytics (ver ANALYTICS.md §10.1)
+pnpm analytics:verify   # verificación cruzada TS ↔ SQL + invariantes V0-V11. Debe dar 0 diferencias
 ```
+
+`analytics:rebuild` y `analytics:verify` corren con `ts-node` contra la base real y necesitan `DATABASE_URL`/`DIRECT_URL`. `rebuild` es destructivo para las tablas **derivadas** (`TRUNCATE`), nunca para `jugadas`; después de cualquier rebuild hay que correr `verify`.
 
 Ejecutar un solo test: `pnpm test -- ring-buffer.spec` o `pnpm test -- --testPathPattern=streak3`.
 

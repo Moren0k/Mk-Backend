@@ -62,6 +62,25 @@ model Jugada {
   /// Permite medir lag de ingesta y detectar caídas del collector.
   insertadoEn DateTime @default(now()) @map("insertado_en") @db.Timestamptz(3)
 
+  /// Relaciones inversas hacia el dominio derivado de Analytics (ver más
+  /// abajo, y la migración `20260907234500_analytics_racha3_base`).
+  ///
+  /// IMPORTANTE: son campos **virtuales** de Prisma. No agregan ni una
+  /// columna, ni un índice, ni una restricción a la tabla `jugadas` — la
+  /// FK vive del lado hijo. Prisma exige declarar ambos extremos de una
+  /// relación, así que esta es la única forma de que las FKs hacia
+  /// `jugadas` existan en la base sin que un `prisma migrate dev` posterior
+  /// las quiera borrar por drift. La tabla sigue siendo exactamente las 7
+  /// columnas de la §4 de DATABASE.md.
+  columnasIniciadas    Columna[]         @relation("ColumnaInicio")
+  columnasFinalizadas  Columna[]         @relation("ColumnaFin")
+  racha3ComoInicio     Racha3Operacion[] @relation("Racha3Inicio")
+  racha3ComoConfirmacion Racha3Operacion[] @relation("Racha3Confirmacion")
+  racha3ComoDirecta    Racha3Operacion[] @relation("Racha3Directa")
+  racha3ComoMg1        Racha3Operacion[] @relation("Racha3Mg1")
+  racha3ComoMg2        Racha3Operacion[] @relation("Racha3Mg2")
+  racha3ComoResolucion Racha3Operacion[] @relation("Racha3Resolucion")
+
   @@map("jugadas")
   @@index([jugadaEn(sort: Desc)])
   @@index([ganador, jugadaEn])
@@ -94,4 +113,201 @@ model ReportCheckpoint {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("report_checkpoints")
+}
+
+// =====================================================================
+// Analytics histórico "Racha 3" (F1).
+//
+// Estos cuatro modelos describen datos DERIVADOS, reconstruibles al 100 %
+// desde `Jugada`. Prisma los modela solo para LECTURA y para que las FKs
+// existan en la base sin drift: el procesamiento (REBUILD e INCREMENTAL)
+// vive íntegramente en funciones plpgsql, no en el cliente de Prisma.
+//
+// Los CHECK constraints (unos 20) viven exclusivamente en el `.sql` de la
+// migración: Prisma no los modela y no los toca. Ver
+// `prisma/migrations/20260907234500_analytics_racha3_base/migration.sql`
+// para la justificación de cada columna, cada índice y cada constraint.
+// =====================================================================
+
+/// Corrida continua observada del mismo ganador. PLAYER, BANKER y TIE son
+/// tipos independientes: un TIE siempre rompe la columna de PLAYER/BANKER.
+/// Nunca se fusiona a través de una discontinuidad temporal (> 120 s): el
+/// corte queda marcado con `cortePorGap`, y por eso pueden existir dos
+/// columnas adyacentes del mismo tipo.
+model Columna {
+  id BigInt @id @default(autoincrement())
+
+  tipo     String @db.VarChar(20)
+  longitud Int
+
+  /// Clave natural de idempotencia del procesamiento incremental.
+  inicioJugadaId BigInt @unique @map("inicio_jugada_id")
+  finJugadaId    BigInt @map("fin_jugada_id")
+
+  inicioEn DateTime @map("inicio_en") @db.Timestamptz(3)
+  finEn    DateTime @map("fin_en") @db.Timestamptz(3)
+
+  /// Empieza por gap, no por cambio de ganador: longitud posiblemente
+  /// truncada por la izquierda.
+  cortePorGap Boolean @default(false) @map("corte_por_gap")
+
+  /// Termina en un gap: longitud posiblemente truncada por la derecha.
+  /// Es lo que permitirá descartar longitudes no confiables cuando se
+  /// implemente el concepto "L" (columna PLAYER/BANKER de longitud >= 6).
+  cerradaPorGap Boolean @default(false) @map("cerrada_por_gap")
+
+  inicioJugada Jugada @relation("ColumnaInicio", fields: [inicioJugadaId], references: [id], onDelete: Restrict)
+  finJugada    Jugada @relation("ColumnaFin", fields: [finJugadaId], references: [id], onDelete: Restrict)
+
+  /// 1:1 estricto: una columna produce a lo sumo una oportunidad Racha 3.
+  racha3 Racha3Operacion?
+
+  @@map("columnas")
+  @@index([tipo, longitud])
+  @@index([finJugadaId])
+}
+
+/// Una oportunidad Racha 3 y su operación simulada, en la misma fila.
+///
+/// Semántica "oportunidad pura": toda columna PLAYER/BANKER que alcanza
+/// longitud 3 produce exactamente una fila, confirmada en su 3.a jugada,
+/// con independencia de si el motor de alertas habría podido operarla en
+/// ese instante — eso queda registrado en `bloqueadaPorOperacionPrevia`.
+model Racha3Operacion {
+  id BigInt @id @default(autoincrement())
+
+  /// Clave natural de idempotencia del procesamiento incremental.
+  columnaId BigInt @unique @map("columna_id")
+
+  /// PLAYER | BANKER (con CHECK en la base).
+  tipoRacha String @map("tipo_racha") @db.VarChar(20)
+
+  /// Siempre el opuesto de `tipoRacha`.
+  apuesta String @db.VarChar(20)
+
+  jugadaInicioId       BigInt @map("jugada_inicio_id")
+  jugadaConfirmacionId BigInt @unique @map("jugada_confirmacion_id")
+
+  /// Escalera de martingala. Los TIE son neutrales y no ocupan estos slots;
+  /// su cantidad queda en `tiesEnOperacion`.
+  jugadaDirectaId    BigInt? @map("jugada_directa_id")
+  jugadaMg1Id        BigInt? @map("jugada_mg1_id")
+  jugadaMg2Id        BigInt? @map("jugada_mg2_id")
+  jugadaResolucionId BigInt? @map("jugada_resolucion_id")
+
+  inicioEn       DateTime  @map("inicio_en") @db.Timestamptz(3)
+  confirmacionEn DateTime  @map("confirmacion_en") @db.Timestamptz(3)
+  resueltaEn     DateTime? @map("resuelta_en") @db.Timestamptz(3)
+
+  /// PENDIENTE | RESUELTA. Una PENDIENTE sobrevive entre lotes y se
+  /// reevalúa en cada corrida incremental.
+  estado String @db.VarChar(12)
+
+  /// DIRECTA | MG1 | MG2 | LOSS. `DIRECTA` equivale a OperationState.WON
+  /// con currentMartingale = 0 (el motor no tiene ese concepto).
+  resultadoFinal String? @map("resultado_final") @db.VarChar(10)
+
+  /// maxMartingales realmente usado para simular ESTA operación: en el
+  /// motor es mutable en runtime vía API, así que no puede asumirse 2.
+  maxMartingalas Int @default(2) @map("max_martingalas") @db.SmallInt
+
+  duracionMs BigInt? @map("duracion_ms")
+
+  /// Incluye los TIE neutrales. Máximo observado sobre el histórico: 7.
+  jugadasEvaluadas Int? @map("jugadas_evaluadas")
+  tiesEnOperacion  Int? @map("ties_en_operacion")
+
+  /// Distancias contra la Racha 3 inmediatamente anterior en orden de
+  /// confirmación, sobre TODAS las filas. NULL en la primera del histórico.
+  jugadasDesdeAnterior  Int? @map("jugadas_desde_anterior")
+  columnasDesdeAnterior Int? @map("columnas_desde_anterior")
+  segundosDesdeAnterior Int? @map("segundos_desde_anterior")
+
+  /// Hora 0-23 en 'America/Bogota'. Columnas normales, nunca generadas:
+  /// `AT TIME ZONE` con nombre de zona es STABLE, y PostgreSQL no admite
+  /// STABLE en GENERATED STORED ni en un índice de expresión.
+  horaColInicio       Int  @map("hora_col_inicio") @db.SmallInt
+  horaColConfirmacion Int  @map("hora_col_confirmacion") @db.SmallInt
+  horaColResolucion   Int? @map("hora_col_resolucion") @db.SmallInt
+
+  /// El motor real no habría podido alertar aquí (seguía abierta la
+  /// operación de una Racha 3 anterior). El Core las excluye por defecto.
+  bloqueadaPorOperacionPrevia Boolean @default(false) @map("bloqueada_por_operacion_previa")
+
+  /// false: hay una discontinuidad temporal dentro de la ventana de esta
+  /// oportunidad. Faltan rondas reales; la fila es sospechosa.
+  integridadOk Boolean @default(true) @map("integridad_ok")
+
+  /// Metadato del pipeline, no del juego: cuándo se recalculó esta fila.
+  procesadaEn DateTime @default(now()) @map("procesada_en") @db.Timestamptz(3)
+
+  columna            Columna @relation(fields: [columnaId], references: [id], onDelete: Cascade)
+  jugadaInicio       Jugada  @relation("Racha3Inicio", fields: [jugadaInicioId], references: [id], onDelete: Restrict)
+  jugadaConfirmacion Jugada  @relation("Racha3Confirmacion", fields: [jugadaConfirmacionId], references: [id], onDelete: Restrict)
+  jugadaDirecta      Jugada? @relation("Racha3Directa", fields: [jugadaDirectaId], references: [id], onDelete: Restrict)
+  jugadaMg1          Jugada? @relation("Racha3Mg1", fields: [jugadaMg1Id], references: [id], onDelete: Restrict)
+  jugadaMg2          Jugada? @relation("Racha3Mg2", fields: [jugadaMg2Id], references: [id], onDelete: Restrict)
+  jugadaResolucion   Jugada? @relation("Racha3Resolucion", fields: [jugadaResolucionId], references: [id], onDelete: Restrict)
+
+  @@map("racha3_operaciones")
+  @@index([confirmacionEn(sort: Desc)])
+}
+
+/// Hasta dónde procesó cada proceso derivado. Una fila por proceso
+/// ("racha3" es el único en v1). Ausencia de fila = nunca se procesó, que
+/// es un estado legítimo: la crea el REBUILD.
+model AnalyticsCheckpoint {
+  proceso String @id @db.VarChar(40)
+
+  /// Marca de agua, NUNCA extremo de un rango cerrado: `jugadas.id` tiene
+  /// huecos (ON CONFLICT DO NOTHING del batcher de ingesta). Siempre
+  /// `id > checkpoint ORDER BY id`, jamás `id BETWEEN a AND b`.
+  ultimaJugadaId BigInt @map("ultima_jugada_id")
+
+  /// Detecta inserciones retroactivas que romperían el orden por id.
+  ultimaJugadaEn DateTime @map("ultima_jugada_en") @db.Timestamptz(3)
+
+  /// Punto de rebobinado seguro: desde aquí relee el incremental, no desde
+  /// `ultimaJugadaId`. Cubre la columna abierta y las operaciones PENDIENTE.
+  reprocesoDesdeJugadaId BigInt @map("reproceso_desde_jugada_id")
+
+  ultimaEjecucionId BigInt?  @map("ultima_ejecucion_id")
+  actualizadoEn     DateTime @map("actualizado_en") @db.Timestamptz(3)
+
+  ultimaEjecucion AnalyticsEjecucion? @relation(fields: [ultimaEjecucionId], references: [id], onDelete: SetNull)
+
+  @@map("analytics_checkpoints")
+}
+
+/// Bitácora de cada corrida del procesamiento derivado: éxito, error,
+/// reintento y rango recorrido. Una sola fila por corrida, escrita al final
+/// con el estado definitivo — plpgsql no tiene transacciones autónomas, así
+/// que una fila "EN_CURSO" desaparecería en el ROLLBACK del mismo fallo que
+/// se quiere registrar.
+model AnalyticsEjecucion {
+  id      BigInt @id @default(autoincrement())
+  proceso String @db.VarChar(40)
+
+  /// REBUILD | INCREMENTAL
+  tipo String @db.VarChar(12)
+
+  /// OK | ERROR
+  estado String @db.VarChar(12)
+
+  /// `desdeJugadaId` es el punto de rebobinado, no `ultimaJugadaId + 1`.
+  desdeJugadaId        BigInt? @map("desde_jugada_id")
+  hastaJugadaId        BigInt? @map("hasta_jugada_id")
+  jugadasLeidas        Int?    @map("jugadas_leidas")
+  columnasAfectadas    Int?    @map("columnas_afectadas")
+  operacionesAfectadas Int?    @map("operaciones_afectadas")
+  duracionMs           Int?    @map("duracion_ms")
+  error                String?
+
+  iniciadoEn  DateTime  @map("iniciado_en") @db.Timestamptz(3)
+  terminadoEn DateTime? @map("terminado_en") @db.Timestamptz(3)
+
+  checkpoints AnalyticsCheckpoint[]
+
+  @@map("analytics_ejecuciones")
+  @@index([proceso, iniciadoEn(sort: Desc)])
 }
