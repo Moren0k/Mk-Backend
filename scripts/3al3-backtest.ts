@@ -1,7 +1,7 @@
 /**
  * Backtest de la estrategia experimental "Racha 3 Test".
  *
- *   pnpm racha3-test:backtest
+ *   pnpm 3al3:backtest
  *
  * Corre DOS evaluaciones distintas sobre el mismo histórico, y la diferencia
  * entre las dos es el punto del ejercicio:
@@ -48,22 +48,22 @@
  */
 import { PrismaClient } from '@prisma/client';
 
-import { calcularEquilibrio } from '../src/core/racha3-test/equilibrio';
-import { intervaloWilson } from '../src/core/racha3-test/wilson';
+import { calcularEquilibrio } from '../src/core/tres-al-tres/equilibrio';
+import { intervaloWilson } from '../src/core/tres-al-tres/wilson';
 
 /** Los mismos defaults que `configuration.ts`. */
 const MUESTRA_MINIMA = Number.parseInt(
-  process.env.RACHA3_TEST_MIN_MUESTRA ?? '500',
+  process.env.TRES_AL_TRES_MIN_MUESTRA ?? '500',
   10,
 );
 const UMBRAL_MINIMO = Number.parseFloat(
-  process.env.RACHA3_TEST_UMBRAL_MINIMO ?? '0',
+  process.env.TRES_AL_TRES_UMBRAL_MINIMO ?? '0',
 );
-const ESCALERA = (process.env.RACHA3_TEST_ESCALERA ?? '1,2,4')
+const ESCALERA = (process.env.TRES_AL_TRES_ESCALERA ?? '1,2,4')
   .split(',')
   .map((x) => Number.parseFloat(x.trim()));
 const DEVOLUCION_TIE = Number.parseFloat(
-  process.env.RACHA3_TEST_DEVOLUCION_TIE ?? '0.9',
+  process.env.TRES_AL_TRES_DEVOLUCION_TIE ?? '0.9',
 );
 
 /**
@@ -326,7 +326,7 @@ async function main(): Promise<void> {
   const t0 = Date.now();
 
   try {
-    // Mismos filtros que `Racha3TestEvidenceProvider`: se excluyen las
+    // Mismos filtros que `TresAlTresEvidenceProvider`: se excluyen las
     // bloqueadas (el motor real no habría podido emitir ahí) y se INCLUYEN
     // las de integridad dudosa (se reportan aparte, no se esconden).
     const filas = await prisma.$queryRaw<

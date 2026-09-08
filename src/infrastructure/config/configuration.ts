@@ -5,18 +5,6 @@
  * aplicación nunca debe leer `process.env` directamente, solo `ConfigService`.
  */
 
-/**
- * Normaliza una variable opcional: `""` pasa a `undefined`.
- *
- * Importa donde hay una cadena de respaldo con `??`: una variable declarada
- * pero vacía en el `.env` (`RACHA3_TEST_TELEGRAM_BOT_TOKEN=`) llega como
- * `""`, que NO es nullish, así que el `??` se quedaría con la cadena vacía y
- * el respaldo nunca se aplicaría. Se usa solo donde ese respaldo existe;
- * el resto de la config se deja como está.
- */
-const opcional = (valor: string | undefined): string | undefined =>
-  valor === undefined || valor.trim().length === 0 ? undefined : valor;
-
 export default () => ({
   app: {
     port: parseInt(process.env.PORT ?? '3000', 10),
@@ -98,60 +86,6 @@ export default () => ({
     // unas pocas jugadas no cambia ninguna conclusión. Un tick sin jugadas
     // nuevas no toca la base.
     intervalMs: parseInt(process.env.ANALYTICS_INTERVAL_MS ?? '60000', 10),
-  },
-  racha3Test: {
-    // Estrategia EXPERIMENTAL "Racha 3 Test" (ver RACHA3-TEST.md). Arranca
-    // APAGADA a propósito: sin esto en "true" el coordinator no se suscribe
-    // a nada y su canal de Telegram no envía nada. No crea operaciones ni
-    // apuestas reales en ningún caso.
-    enabled: process.env.RACHA3_TEST_ENABLED === 'true',
-    // Umbral del score para TOMAR. Default 86.87 = límite inferior del
-    // IC95 de Wilson de la tasa de acierto del histórico GLOBAL al
-    // 2026-09-08 (3577/4069). Es decir: "solo tomar una oportunidad cuya
-    // tasa defendible sea al menos tan buena como el histórico completo".
-    // Es el umbral experimental INICIAL, no un valor universal: al crecer
-    // el histórico el límite se mueve y hay que revisarlo.
-    // Umbral MÍNIMO exigido. El umbral efectivo es el mayor entre éste y el
-    // PUNTO DE EQUILIBRIO calculado, así que este parámetro sólo puede
-    // hacer el sistema más exigente, nunca menos.
-    //
-    // El default es 0 a propósito: el equilibrio manda. Antes esto era 86,87
-    // (el límite inferior del IC95 del histórico global), un umbral
-    // incoherente — comparaba un subgrupo contra el grupo que lo contiene, y
-    // con dos categorías siempre aprobaba una y rechazaba la otra por pura
-    // aritmética. Ver `core/racha3-test/equilibrio.ts`.
-    umbralMinimo: parseFloat(process.env.RACHA3_TEST_UMBRAL_MINIMO ?? '0'),
-    // Importe apostado en cada nivel. Define la pérdida por fallo (su suma)
-    // y el número de intentos (su longitud). Debe coincidir con la
-    // progresión real y con `max_martingalas`.
-    escalera: (process.env.RACHA3_TEST_ESCALERA ?? '1,2,4')
-      .split(',')
-      .map((x) => parseFloat(x.trim()))
-      .filter((x) => Number.isFinite(x) && x > 0),
-    // Fracción del importe que devuelve un empate. 0.90 = devuelve el 90 %,
-    // es decir CUESTA el 10 %. No es gratis, y con empates en el 11,5 % de
-    // las rondas ese 10 % mueve el equilibrio de 87,500 % a 87,983 % — más
-    // que toda la ventaja del lado del banco. Si en la mesa devuelven el
-    // 100 %, poner 1 aquí vuelve la estrategia rentable.
-    devolucionTie: parseFloat(process.env.RACHA3_TEST_DEVOLUCION_TIE ?? '0.9'),
-    // Ganancia neta de un acierto, en unidades. 1 = pago 1:1 sin comisión.
-    pagoAcierto: parseFloat(process.env.RACHA3_TEST_PAGO_ACIERTO ?? '1'),
-    // Mínimo de oportunidades resueltas que debe respaldar la condición.
-    // Bajo esto se descarta sin importar el score: una muestra insuficiente
-    // no se compensa con puntos.
-    muestraMinima: parseInt(process.env.RACHA3_TEST_MIN_MUESTRA ?? '500', 10),
-    // Máximas jugadas sin procesar por Analytics antes de considerar que la
-    // evidencia no está al día. Con el scheduler cada 60 s y una cadencia
-    // de ~33 s por ronda, el rezago normal es de 1-2 jugadas; 50 tolera un
-    // par de ticks perdidos sin aceptar evidencia realmente vieja.
-    maxRezagoJugadas: parseInt(process.env.RACHA3_TEST_MAX_REZAGO ?? '50', 10),
-    telegram: {
-      // Bot/chat del canal DEBUG. Si no se definen, se reutilizan los de
-      // TELEGRAM_PRUEBAS_*: comparte el destino sin compartir el
-      // interruptor (ver Racha3TestModule).
-      botToken: opcional(process.env.RACHA3_TEST_TELEGRAM_BOT_TOKEN),
-      chatId: opcional(process.env.RACHA3_TEST_TELEGRAM_CHAT_ID),
-    },
   },
   report: {
     // Cada cuánto ReportCheckpointScheduler persiste won/lost/alertsSent

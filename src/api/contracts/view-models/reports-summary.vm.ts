@@ -34,7 +34,7 @@ export type ReportsChannelSummaryVm = {
    * propagarlo por `OperationSnapshot` y `OperationClosedRecord`, y añadir
    * la columna correspondiente a `report_checkpoints` para que el acumulado
    * sobreviva a un reinicio. Queda como trabajo separado; el cálculo de
-   * referencia está en `core/racha3-test/equilibrio.ts` y las funciones SQL
+   * referencia está en `core/tres-al-tres/equilibrio.ts` y las funciones SQL
    * que lo miden en `racha3_ties_por_nivel()` (ver ANALYTICS.md).
    */
   readonly netUnits: number;

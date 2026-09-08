@@ -1,19 +1,19 @@
 import { WinnerType } from '../enums/winner-type.enum';
-import { calcularRacha3TestScore } from './racha3-test-score.calculator';
+import { calcularTresAlTresScore } from './tres-al-tres-score.calculator';
 import {
-  Racha3TestContexto,
-  Racha3TestEstadoAnalytics,
-  Racha3TestEvidencia,
-  Racha3TestLados,
-  Racha3TestParametros,
-} from './types/racha3-test.type';
+  TresAlTresContexto,
+  TresAlTresEstadoAnalytics,
+  TresAlTresEvidencia,
+  TresAlTresLados,
+  TresAlTresParametros,
+} from './types/tres-al-tres.type';
 
 /**
  * Fixtures con los CONTEOS REALES del histórico al 2026-09-09, para que las
  * pruebas fijen los números con los que se justificó el rediseño y no unos
  * inventados.
  */
-const EVIDENCIA_PLAYER: Racha3TestEvidencia = {
+const EVIDENCIA_PLAYER: TresAlTresEvidencia = {
   condicion: 'tipo_racha=PLAYER',
   tipoRacha: WinnerType.PLAYER,
   aciertos: 1873,
@@ -31,7 +31,7 @@ const EVIDENCIA_PLAYER: Racha3TestEvidencia = {
 };
 
 /** Distribución real de `jugadas`: BANKER gana un poco más que PLAYER. */
-const LADOS: Racha3TestLados = {
+const LADOS: TresAlTresLados = {
   total: 44139,
   banker: 19733,
   player: 19312,
@@ -48,7 +48,7 @@ const TIES_BANKER = [
 ];
 const OPERACIONES_BANKER = 2095;
 
-const CONTEXTO: Racha3TestContexto = {
+const CONTEXTO: TresAlTresContexto = {
   horaColombia: 10,
   diaSemana: 2,
   distanciaActual: 7,
@@ -59,7 +59,7 @@ const CONTEXTO: Racha3TestContexto = {
   columnaConCortePorGap: false,
 };
 
-const ESTADO_OK: Racha3TestEstadoAnalytics = {
+const ESTADO_OK: TresAlTresEstadoAnalytics = {
   disponible: true,
   checkpointExiste: true,
   jugadasSinProcesar: 1,
@@ -67,19 +67,20 @@ const ESTADO_OK: Racha3TestEstadoAnalytics = {
   error: null,
 };
 
-const PARAMETROS: Racha3TestParametros = {
+const PARAMETROS: TresAlTresParametros = {
   umbralMinimo: 0,
   muestraMinima: 500,
   maxRezagoJugadas: 50,
   escalera: [1, 2, 4],
   devolucionTie: 0.9,
   pagoAcierto: 1,
+  exigirModelo: true,
 };
 
-type Entrada = Parameters<typeof calcularRacha3TestScore>[0];
+type Entrada = Parameters<typeof calcularTresAlTresScore>[0];
 
 function calcular(cambios: Partial<Entrada> = {}) {
-  return calcularRacha3TestScore({
+  return calcularTresAlTresScore({
     evidencia: EVIDENCIA_PLAYER,
     lados: LADOS,
     tiesPorNivel: TIES_BANKER,
@@ -96,7 +97,7 @@ function calcular(cambios: Partial<Entrada> = {}) {
 const gate = (r: ReturnType<typeof calcular>, nombre: string) =>
   r.gates.find((g) => g.gate === nombre);
 
-describe('calcularRacha3TestScore', () => {
+describe('calcularTresAlTresScore', () => {
   describe('el umbral sale de la estructura de pago, no del historial', () => {
     it('con la escalera 1-2-4 y devolución 0,9 el umbral es 87,95', () => {
       // (7 + 74,90/2095) / 8 = 87,947 % → 87,95.

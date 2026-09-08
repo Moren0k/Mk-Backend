@@ -7,15 +7,15 @@ import {
   type TiesEnNivel,
 } from './equilibrio';
 import {
-  Racha3TestContexto,
-  Racha3TestEstadoAnalytics,
-  Racha3TestEvidencia,
-  Racha3TestGateEvaluado,
-  Racha3TestLados,
-  Racha3TestNivel,
-  Racha3TestParametros,
-  Racha3TestScore,
-} from './types/racha3-test.type';
+  TresAlTresContexto,
+  TresAlTresEstadoAnalytics,
+  TresAlTresEvidencia,
+  TresAlTresGateEvaluado,
+  TresAlTresLados,
+  TresAlTresNivel,
+  TresAlTresParametros,
+  TresAlTresScore,
+} from './types/tres-al-tres.type';
 import { intervaloWilson, Z_95 } from './wilson';
 
 /**
@@ -118,17 +118,17 @@ import { intervaloWilson, Z_95 } from './wilson';
  *
  * `tomar = true` exige que NINGÚN gate haya disparado.
  */
-export function calcularRacha3TestScore(entrada: {
-  readonly evidencia: Racha3TestEvidencia | null;
-  readonly lados: Racha3TestLados | null;
+export function calcularTresAlTresScore(entrada: {
+  readonly evidencia: TresAlTresEvidencia | null;
+  readonly lados: TresAlTresLados | null;
   readonly tiesPorNivel: readonly TiesEnNivel[];
   readonly operacionesMedidas: number;
   readonly apuesta: WinnerType;
-  readonly contexto: Racha3TestContexto;
-  readonly estadoAnalytics: Racha3TestEstadoAnalytics;
+  readonly contexto: TresAlTresContexto;
+  readonly estadoAnalytics: TresAlTresEstadoAnalytics;
   readonly operacionVirtualAbierta: boolean;
-  readonly parametros: Racha3TestParametros;
-}): Racha3TestScore {
+  readonly parametros: TresAlTresParametros;
+}): TresAlTresScore {
   const { evidencia, lados, contexto, estadoAnalytics, apuesta, parametros } =
     entrada;
   const {
@@ -143,7 +143,7 @@ export function calcularRacha3TestScore(entrada: {
   const razones: string[] = [];
   const advertencias: string[] = [];
   const traza: string[] = [];
-  const gates: Racha3TestGateEvaluado[] = [];
+  const gates: TresAlTresGateEvaluado[] = [];
 
   const contextoConPeso = { ...contexto, peso: 0 as const };
   const intentos = escalera.length;
@@ -200,13 +200,16 @@ export function calcularRacha3TestScore(entrada: {
   const sinModelo = lados === null || lados.noTie <= 0;
   gates.push({
     gate: 'MODELO_SIN_EVIDENCIA',
-    disparado: sinModelo,
+    // Solo bloquea si el modelo es exigido. Con `exigirModelo: false` la
+    // ausencia de conteos de jugadas se reporta pero no descarta: decide la
+    // estimación directa por su cuenta.
+    disparado: sinModelo && parametros.exigirModelo,
     motivo: sinModelo
       ? 'Faltan los conteos de jugadas para estimar la ventaja del lado.'
       : `${lados.noTie} rondas no-empate disponibles.`,
   });
 
-  if (sinEvidencia || sinModelo) {
+  if (sinEvidencia || (sinModelo && parametros.exigirModelo)) {
     razones.push(
       sinEvidencia
         ? estadoAnalytics.error
@@ -269,44 +272,89 @@ export function calcularRacha3TestScore(entrada: {
   );
 
   // ---------- Estimación por MODELO ----------
-  const gana = apuesta === WinnerType.BANKER ? lados.banker : lados.player;
-  const pierde = apuesta === WinnerType.BANKER ? lados.player : lados.banker;
-  const icOmega = intervaloWilson(gana, lados.noTie, Z_95);
-  const tasaEsperada = tasaDeEscalera(icOmega.proporcion, intentos);
-  const tasaLimiteInferior = tasaDeEscalera(icOmega.limiteInferior, intentos);
-  const scoreModelo = redondear2(100 * tasaLimiteInferior);
+  // Puede faltar: con `exigirModelo: false` la ausencia de conteos de
+  // jugadas no descarta la oportunidad, solo deja esta estimación en null.
+  const modelo =
+    lados === null
+      ? null
+      : (() => {
+          const gana =
+            apuesta === WinnerType.BANKER ? lados.banker : lados.player;
+          const pierde =
+            apuesta === WinnerType.BANKER ? lados.player : lados.banker;
+          const icOmega = intervaloWilson(gana, lados.noTie, Z_95);
 
-  const ventaja = ventajaPorUnidad({
-    gana,
-    pierde,
-    empata: lados.tie,
-    devolucionTie,
-  });
+          return {
+            lado: apuesta,
+            gana,
+            pierde,
+            empata: lados.tie,
+            corteId: lados.corteId,
+            noTie: lados.noTie,
+            omega: icOmega.proporcion,
+            intervaloOmega: icOmega,
+            intentos,
+            tasaEsperada: tasaDeEscalera(icOmega.proporcion, intentos),
+            tasaLimiteInferior: tasaDeEscalera(
+              icOmega.limiteInferior,
+              intentos,
+            ),
+          };
+        })();
 
-  traza.push(
-    `3. MODELO — ventaja del lado ${apuesta} sobre jugadas (corte ${lados.corteId}): ` +
-      `gana=${gana} pierde=${pierde} empata=${lados.tie}`,
-  );
-  traza.push(
-    `   ω = ${gana}/${lados.noTie} = ${icOmega.proporcion.toFixed(8)} · ` +
-      `IC95 = [${icOmega.limiteInferior.toFixed(8)}, ${icOmega.limiteSuperior.toFixed(8)}]`,
-  );
-  traza.push(
-    `   tasa = 1 − (1−ω)^${intentos} → esperada ${(100 * tasaEsperada).toFixed(3)}%, ` +
-      `límite inferior ${(100 * tasaLimiteInferior).toFixed(3)}% → score modelo = ${scoreModelo}`,
-  );
-  traza.push(
-    `   ventaja por unidad apostada = ${ventaja.toFixed(5)} ` +
-      `(${(100 * ventaja).toFixed(3)}%) — ninguna escalera la cambia`,
-  );
+  const scoreModelo =
+    modelo === null ? null : redondear2(100 * modelo.tasaLimiteInferior);
+
+  const ventaja =
+    modelo === null
+      ? null
+      : ventajaPorUnidad({
+          gana: modelo.gana,
+          pierde: modelo.pierde,
+          empata: modelo.empata,
+          devolucionTie,
+        });
+
+  if (modelo === null) {
+    traza.push(
+      '3. MODELO — sin conteos de jugadas disponibles. No bloquea porque ' +
+        'exigirModelo=false; decide la estimación directa.',
+    );
+  } else {
+    traza.push(
+      `3. MODELO — ventaja del lado ${apuesta} sobre jugadas (corte ${modelo.corteId}): ` +
+        `gana=${modelo.gana} pierde=${modelo.pierde} empata=${modelo.empata}`,
+    );
+    traza.push(
+      `   ω = ${modelo.gana}/${modelo.noTie} = ${modelo.omega.toFixed(8)} · ` +
+        `IC95 = [${modelo.intervaloOmega.limiteInferior.toFixed(8)}, ${modelo.intervaloOmega.limiteSuperior.toFixed(8)}]`,
+    );
+    traza.push(
+      `   tasa = 1 − (1−ω)^${intentos} → esperada ${(100 * modelo.tasaEsperada).toFixed(3)}%, ` +
+        `límite inferior ${(100 * modelo.tasaLimiteInferior).toFixed(3)}% → score modelo = ${scoreModelo}`,
+    );
+    traza.push(
+      `   ventaja por unidad apostada = ${ventaja!.toFixed(5)} ` +
+        `(${(100 * ventaja!).toFixed(3)}%) — ninguna escalera la cambia`,
+    );
+  }
 
   // ---------- El score que decide ----------
-  const score = Math.min(scoreDirecto, scoreModelo);
+  // Con `exigirModelo` decide el MENOR de los dos (equivale a exigir que
+  // ambos superen el umbral); si no, decide la DIRECTA y la del modelo queda
+  // como dato auditable en la traza y en el log.
+  const score =
+    parametros.exigirModelo && scoreModelo !== null
+      ? Math.min(scoreDirecto, scoreModelo)
+      : scoreDirecto;
   const evEstimado = evPorOperacion(score / 100, equilibrio);
 
   traza.push(
-    `4. score = min(directa ${scoreDirecto}, modelo ${scoreModelo}) = ${score} ` +
-      `(exigir las dos ≡ exigirlo del mínimo)`,
+    parametros.exigirModelo
+      ? `4. score = min(directa ${scoreDirecto}, modelo ${scoreModelo ?? 'n/d'}) = ${score} ` +
+          '(exigir las dos ≡ exigirlo del mínimo)'
+      : `4. score = directa ${scoreDirecto} (exigirModelo=false; la del modelo ` +
+          `da ${scoreModelo ?? 'n/d'} y queda solo como referencia)`,
   );
   traza.push(
     `5. EV estimado = ${(score / 100).toFixed(6)}×${equilibrio.gananciaPorAcierto} − ` +
@@ -369,7 +417,7 @@ export function calcularRacha3TestScore(entrada: {
     );
   } else {
     const cual =
-      scoreDirecto < umbral && scoreModelo < umbral
+      scoreModelo !== null && scoreDirecto < umbral && scoreModelo < umbral
         ? 'ninguna de las dos estimaciones'
         : scoreDirecto < umbral
           ? 'la estimación directa'
@@ -381,7 +429,7 @@ export function calcularRacha3TestScore(entrada: {
     );
   }
 
-  if (ventaja < 0) {
+  if (ventaja !== null && ventaja < 0) {
     razones.push(
       `La ventaja por unidad apostada del lado ${apuesta} es ${(100 * ventaja).toFixed(3)}%: ` +
         `negativa, y ninguna escalera de martingala la corrige.`,
@@ -403,7 +451,7 @@ export function calcularRacha3TestScore(entrada: {
       `Analytics advierte sobre el tamaño de muestra: ${evidencia.advertenciaMuestra}.`,
     );
   }
-  if (Math.abs(scoreDirecto - scoreModelo) > 1) {
+  if (scoreModelo !== null && Math.abs(scoreDirecto - scoreModelo) > 1) {
     advertencias.push(
       `Las dos estimaciones difieren en ${Math.abs(scoreDirecto - scoreModelo).toFixed(2)} ` +
         `puntos (directa ${scoreDirecto}, modelo ${scoreModelo}). La directa tiene ~9× menos ` +
@@ -456,17 +504,20 @@ export function calcularRacha3TestScore(entrada: {
         suficiente: muestraSuficiente,
       },
       intervalo: ic,
-      modelo: {
-        lado: apuesta,
-        gana,
-        pierde,
-        empata: lados.tie,
-        omega: icOmega.proporcion,
-        intervaloOmega: icOmega,
-        intentos,
-        tasaEsperada,
-        tasaLimiteInferior,
-      },
+      modelo:
+        modelo === null
+          ? null
+          : {
+              lado: modelo.lado,
+              gana: modelo.gana,
+              pierde: modelo.pierde,
+              empata: modelo.empata,
+              omega: modelo.omega,
+              intervaloOmega: modelo.intervaloOmega,
+              intentos: modelo.intentos,
+              tasaEsperada: modelo.tasaEsperada,
+              tasaLimiteInferior: modelo.tasaLimiteInferior,
+            },
       contexto: contextoConPeso,
     },
     penalizaciones: [],
@@ -487,7 +538,7 @@ function redondear2(valor: number): number {
  * `score >= umbral` es TOMAR. Se distingue de `SOBRE_UMBRAL` para que un
  * caso al filo sea visible en el DEBUG en vez de parecer holgado.
  */
-function nivelDe(score: number, umbral: number): Racha3TestNivel {
+function nivelDe(score: number, umbral: number): TresAlTresNivel {
   if (score < umbral) return 'BAJO_UMBRAL';
   if (score === umbral) return 'EN_UMBRAL';
   return 'SOBRE_UMBRAL';

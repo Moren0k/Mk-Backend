@@ -1,13 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 import { WinnerType } from '../../core/enums/winner-type.enum';
-import type { TiesEnNivel } from '../../core/racha3-test/equilibrio';
+import type { TiesEnNivel } from '../../core/tres-al-tres/equilibrio';
 import {
-  Racha3TestContexto,
-  Racha3TestEstadoAnalytics,
-  Racha3TestEvidencia,
-  Racha3TestLados,
-} from '../../core/racha3-test/types/racha3-test.type';
+  TresAlTresContexto,
+  TresAlTresEstadoAnalytics,
+  TresAlTresEvidencia,
+  TresAlTresLados,
+} from '../../core/tres-al-tres/types/tres-al-tres.type';
 import { Racha3AnalyticsReadModel } from '../analytics/racha3-analytics.read-model';
 
 /** Cotas de bucket para el contexto de distancia. Las acordadas del dominio. */
@@ -24,15 +24,15 @@ const COTAS = [5, 10, 15, 20, 30, 50] as const;
 const UMBRAL_MUESTRA_ANALYTICS = 100;
 
 export type EvidenciaRecolectada = {
-  readonly evidencia: Racha3TestEvidencia | null;
+  readonly evidencia: TresAlTresEvidencia | null;
   /** Segunda fuente: conteos de `jugadas` para la estimación por modelo. */
-  readonly lados: Racha3TestLados | null;
+  readonly lados: TresAlTresLados | null;
   /** Empates por nivel de la escalera: definen el peaje y con él el umbral. */
   readonly tiesPorNivel: readonly TiesEnNivel[];
   /** Operaciones sobre las que se midió el peaje. */
   readonly operacionesMedidas: number;
-  readonly contexto: Racha3TestContexto;
-  readonly estadoAnalytics: Racha3TestEstadoAnalytics;
+  readonly contexto: TresAlTresContexto;
+  readonly estadoAnalytics: TresAlTresEstadoAnalytics;
 };
 
 /**
@@ -54,8 +54,8 @@ export type EvidenciaRecolectada = {
  * evidencia como gate, no como score neutro.
  */
 @Injectable()
-export class Racha3TestEvidenceProvider {
-  private readonly logger = new Logger(Racha3TestEvidenceProvider.name);
+export class TresAlTresEvidenceProvider {
+  private readonly logger = new Logger(TresAlTresEvidenceProvider.name);
 
   constructor(private readonly analytics: Racha3AnalyticsReadModel) {}
 
@@ -110,7 +110,7 @@ export class Racha3TestEvidenceProvider {
 
       const aciertos = resumen.directa + resumen.mg1 + resumen.mg2;
 
-      const evidencia: Racha3TestEvidencia = {
+      const evidencia: TresAlTresEvidencia = {
         condicion: `tipo_racha=${filtros.tipo}`,
         tipoRacha,
         aciertos,
@@ -127,7 +127,7 @@ export class Racha3TestEvidenceProvider {
         ventanaHasta: resumen.ventana_hasta,
       };
 
-      const contexto: Racha3TestContexto = {
+      const contexto: TresAlTresContexto = {
         ...contextoBase,
         distanciaActual: distancia.distancia.jugadas_desde_ultima,
         distanciaExacta: distancia.distancia.distancia_exacta,

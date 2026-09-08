@@ -12,7 +12,7 @@
 - **Formato de respuesta:** siempre JSON, siempre el mismo sobre (`{ data, meta?, requestId }` o `{ error }`) — ver §2.
 - **Nada de esto habla con Tipminer/Telegram/Prisma directo**: todo pasa por casos de uso ya existentes en `application/`.
 - **Analytics histórico:** `GET /api/v1/analytics/racha3/*` (§4.13) expone evidencia estadística sobre las ~42.500 jugadas persistidas. Es el único recurso que **depende de la base de datos**: sin `DATABASE_URL` responde `503`. Tres reglas antes de consumirlo — no predice nada, `frecuencia_historica` y `tasa_empirica_condicionada` no son comparables, y las tasas son **fracciones** en [0,1], no porcentajes. Ver §4.13.
-- **⚠️ El motor arranca completamente apagado:** las 2 estrategias existen en código (`streak-3`, `streak-4` — ver `GET /api/v1/strategies`, §4.11) pero **ninguna corre** hasta que se le asigne un canal y ese canal se active vía `PATCH /api/v1/channels/:channel` (§4.7). Un reinicio del proceso vuelve a apagar todo (no hay persistencia de esta configuración) — hay que reconfigurar los canales cada vez que el proceso arranca.
+- **⚠️ El motor arranca completamente apagado:** las 3 estrategias existen en código (`streak-3`, `streak-4`, `3al3` — ver `GET /api/v1/strategies`, §4.11) pero **ninguna corre** hasta que se le asigne un canal y ese canal se active vía `PATCH /api/v1/channels/:channel` (§4.7). Un reinicio del proceso vuelve a apagar todo (no hay persistencia de esta configuración) — hay que reconfigurar los canales cada vez que el proceso arranca.
 - **Un canal, como máximo una estrategia:** el registro lo garantiza — asignar una estrategia distinta a un canal ya ocupado expulsa automáticamente a la anterior (ver §4.7).
 
 ---
@@ -271,7 +271,7 @@ Muta, en runtime y sin reiniciar el proceso, cuál estrategia corre en ese canal
 }
 ```
 
-**Una estrategia (`streak-3`, `streak-4`, o cualquier otra que se registre a futuro — ver `GET /api/v1/strategies`, §4.11) solo evalúa/opera cuando está asignada a un canal Y ese canal tiene `active: true`.** Esto no está fijo en el código de ninguna estrategia — es 100% lo que digan estos dos campos en runtime. Al arrancar el proceso, ninguna estrategia está asignada y ningún canal está activo: hay que configurar esto explícitamente (típicamente una vez por cada arranque del proceso, ya que no persiste — ver §1).
+**Una estrategia (`streak-3`, `streak-4`, `3al3`, o cualquier otra que se registre a futuro — ver `GET /api/v1/strategies`, §4.11) solo evalúa/opera cuando está asignada a un canal Y ese canal tiene `active: true`.** Esto no está fijo en el código de ninguna estrategia — es 100% lo que digan estos dos campos en runtime. Al arrancar el proceso, ninguna estrategia está asignada y ningún canal está activo: hay que configurar esto explícitamente (típicamente una vez por cada arranque del proceso, ya que no persiste — ver §1).
 
 **Invariante: nunca más de una estrategia por canal.** Si `channel` ya tenía otra estrategia distinta asignada, asignar `strategyId` **expulsa automáticamente** a la anterior (queda `strategyId: null` en su propio canal si vuelves a consultarla, deja de evaluar de inmediato) como parte de la misma llamada — no hace falta (ni existe) un paso previo de "desasignar". No hay forma de dejar un canal explícitamente sin estrategia una vez que tuvo una asignada, salvo asignarle una estrategia distinta encima (ver §7).
 
